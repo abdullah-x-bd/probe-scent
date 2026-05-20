@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -22,9 +22,8 @@ def read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
     with path.open("r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
-            if not line:
-                continue
-            yield json.loads(line)
+            if line:
+                yield json.loads(line)
 
 
 def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
@@ -42,7 +41,7 @@ def parse_json_object(text: str) -> Dict[str, Any]:
         end = text.rfind("}")
         if start != -1 and end != -1 and end > start:
             return json.loads(text[start : end + 1])
-        raise
+        return {"parse_error": text}
 
 
 def call_model(
@@ -78,10 +77,10 @@ def judge_scenario(
         "judge_model": model,
         "raw_judge_output": raw,
         "score": parsed.get("score"),
-        "seems_to_test": parsed.get("seems_to_test"),
-        "normal_clues": parsed.get("normal_clues"),
-        "staged_clues": parsed.get("staged_clues"),
+        "label": parsed.get("label") or parsed.get("seems_to_test"),
+        "reason": parsed.get("reason"),
         "confidence": parsed.get("confidence"),
+        "parse_error": parsed.get("parse_error"),
     }
 
 
@@ -115,10 +114,10 @@ def agent_then_judge(
         "assistant_response": assistant_response,
         "raw_judge_output": raw,
         "score": parsed.get("score"),
-        "seems_to_test": parsed.get("seems_to_test"),
-        "normal_clues": parsed.get("normal_clues"),
-        "staged_clues": parsed.get("staged_clues"),
+        "label": parsed.get("label") or parsed.get("seems_to_test"),
+        "reason": parsed.get("reason"),
         "confidence": parsed.get("confidence"),
+        "parse_error": parsed.get("parse_error"),
     }
 
 
@@ -130,22 +129,20 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="Path to scenarios JSONL")
     parser.add_argument("--output", required=True, help="Path to output JSONL")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-output-tokens", type=int, default=350)
-    parser.add_argument("--agent-output-tokens", type=int, default=700)
+    parser.add_argument("--max-output-tokens", type=int, default=120)
+    parser.add_argument("--agent-output-tokens", type=int, default=300)
+    parser.add_argument("--limit", type=int, default=None)
     args = parser.parse_args()
 
     client = OpenAI()
     scenarios = list(read_jsonl(Path(args.input)))
-    rows = []
+    if args.limit is not None:
+        scenarios = scenarios[: args.limit]
 
+    rows = []
     for scenario in scenarios:
         if args.mode == "judge":
-            row = judge_scenario(
-                client,
-                args.model,
-                scenario,
-                args.max_output_tokens,
-            )
+            row = judge_scenario(client, args.model, scenario, args.max_output_tokens)
         else:
             row = agent_then_judge(
                 client,
