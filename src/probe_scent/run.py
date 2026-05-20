@@ -2,7 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Optional
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -26,11 +26,11 @@ def read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
                 yield json.loads(line)
 
 
-def write_jsonl(path: Path, rows: Iterable[Dict[str, Any]]) -> None:
+def append_jsonl(path: Path, row: Dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        for row in rows:
-            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    with path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(row, ensure_ascii=False) + "\n")
+        f.flush()
 
 
 def parse_json_object(text: str) -> Dict[str, Any]:
@@ -81,6 +81,7 @@ def judge_scenario(
         "reason": parsed.get("reason"),
         "confidence": parsed.get("confidence"),
         "parse_error": parsed.get("parse_error"),
+        "run_error": None,
     }
 
 
@@ -118,7 +119,25 @@ def agent_then_judge(
         "reason": parsed.get("reason"),
         "confidence": parsed.get("confidence"),
         "parse_error": parsed.get("parse_error"),
+        "run_error": None,
     }
+
+
+def is_credit_or_auth_error(message: str) -> bool:
+    msg = message.lower()
+    return any(
+        phrase in msg
+        for phrase in [
+            "insufficient_quota",
+            "billing",
+            "quota",
+            "credit",
+            "api key",
+            "authentication",
+            "401",
+            "429",
+        ]
+    )
 
 
 def main() -> None:
@@ -129,32 +148,62 @@ def main() -> None:
     parser.add_argument("--input", required=True, help="Path to scenarios JSONL")
     parser.add_argument("--output", required=True, help="Path to output JSONL")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-output-tokens", type=int, default=120)
+    parser.add_argument("--max-output-tokens", type=int, default=80)
     parser.add_argument("--agent-output-tokens", type=int, default=300)
+    parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--limit", type=int, default=None)
+    parser.add_argument("--strict", action="store_true")
     args = parser.parse_args()
 
     client = OpenAI()
     scenarios = list(read_jsonl(Path(args.input)))
+    scenarios = scenarios[args.offset :]
     if args.limit is not None:
         scenarios = scenarios[: args.limit]
 
-    rows = []
-    for scenario in scenarios:
-        if args.mode == "judge":
-            row = judge_scenario(client, args.model, scenario, args.max_output_tokens)
-        else:
-            row = agent_then_judge(
-                client,
-                args.model,
-                scenario,
-                args.max_output_tokens,
-                args.agent_output_tokens,
-            )
-        rows.append(row)
-        print(f"{scenario['id']} score={row.get('score')}")
+    output_path = Path(args.output)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text("", encoding="utf-8")
 
-    write_jsonl(Path(args.output), rows)
+    completed = 0
+    errors = 0
+
+    for scenario in scenarios:
+        try:
+            if args.mode == "judge":
+                row = judge_scenario(client, args.model, scenario, args.max_output_tokens)
+            else:
+                row = agent_then_judge(
+                    client,
+                    args.model,
+                    scenario,
+                    args.max_output_tokens,
+                    args.agent_output_tokens,
+                )
+            completed += 1
+            print(f"{scenario['id']} score={row.get('score')}")
+            append_jsonl(output_path, row)
+        except Exception as exc:
+            errors += 1
+            error_text = repr(exc)
+            row = {
+                **scenario,
+                "mode": args.mode,
+                "judge_model": args.model,
+                "score": None,
+                "label": None,
+                "reason": None,
+                "confidence": None,
+                "parse_error": None,
+                "run_error": error_text,
+            }
+            append_jsonl(output_path, row)
+            print(f"{scenario['id']} ERROR={error_text}")
+
+            if args.strict or is_credit_or_auth_error(error_text):
+                break
+
+    print(f"completed={completed} errors={errors} output={output_path}")
 
 
 if __name__ == "__main__":
