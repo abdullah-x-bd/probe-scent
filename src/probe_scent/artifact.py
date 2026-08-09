@@ -63,6 +63,39 @@ def _require_column_value(
         errors.append(f"raw results contain wrong {column}; expected {expected}")
 
 
+def _require_column_prefix(
+    canonical: Any,
+    column: str,
+    expected_prefix: str,
+    errors: list[str],
+) -> None:
+    if column not in canonical.columns:
+        errors.append(f"raw results missing required provenance column: {column}")
+        return
+    values = canonical[column].dropna().astype(str)
+    if len(values) != len(canonical):
+        errors.append(f"raw results contain missing provenance values: {column}")
+        return
+    if bool((~values.str.startswith(expected_prefix)).any()):
+        errors.append(f"raw results contain wrong {column}; expected prefix {expected_prefix}")
+
+
+def _require_single_nonempty_value(
+    canonical: Any,
+    column: str,
+    errors: list[str],
+) -> None:
+    if column not in canonical.columns:
+        errors.append(f"raw results missing required provenance column: {column}")
+        return
+    values = canonical[column].dropna().astype(str)
+    if len(values) != len(canonical) or bool((values.str.len() == 0).any()):
+        errors.append(f"raw results contain missing provenance values: {column}")
+        return
+    if values.nunique() != 1:
+        errors.append(f"raw results contain multiple canonical values for {column}")
+
+
 def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True) -> dict[str, Any]:
     config = load_config(config_path)
     errors: list[str] = []
@@ -95,19 +128,30 @@ def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True
         }
 
     canonical = canonicalize_attempts(read_attempts(raw))
-    expected_ids = {s.id for s in read_scenarios(canonical_dataset)}
+    expected_ids = {scenario.id for scenario in read_scenarios(canonical_dataset)}
     actual_ids = set(canonical["scenario_id"].astype(str))
     if actual_ids != expected_ids:
         errors.append(
-            f"canonical result ids mismatch: missing={len(expected_ids-actual_ids)} "
-            f"extra={len(actual_ids-expected_ids)}"
+            f"canonical result ids mismatch: missing={len(expected_ids - actual_ids)} "
+            f"extra={len(actual_ids - expected_ids)}"
         )
 
     _require_column_value(canonical, "dataset_sha256", config.dataset_sha256, errors)
     _require_column_value(canonical, "run_order_sha256", config.run_order_sha256, errors)
     _require_column_value(canonical, "prompt_sha256", prompt_sha256(), errors)
     _require_column_value(canonical, "protocol_version", config.version, errors)
+    _require_column_value(canonical, "judge_backend", config.judge_backend, errors)
     _require_column_value(canonical, "requested_model", config.judge_model, errors)
+    _require_column_value(canonical, "response_model", config.judge_model, errors)
+    _require_column_prefix(
+        canonical, "model_digest", config.judge_model_digest_prefix, errors
+    )
+    _require_column_value(canonical, "temperature", str(config.temperature), errors)
+    _require_column_value(canonical, "inference_seed", str(config.inference_seed), errors)
+    _require_column_value(canonical, "context_length", str(config.context_length), errors)
+    _require_column_value(canonical, "think", str(config.think), errors)
+    _require_single_nonempty_value(canonical, "backend_version", errors)
+    _require_single_nonempty_value(canonical, "model_digest", errors)
 
     missing = [rel for rel in REQUIRED_DERIVED if not (result_dir / rel).exists()]
     if missing:
@@ -153,9 +197,11 @@ def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True
         "errors": errors,
         "dataset": dataset_receipt,
         "pair_audit": str(pair_audit_path),
-        "canonical_rows": int(len(canonical)),
-        "expected_rows": int(len(expected_ids)),
+        "canonical_rows": len(canonical),
+        "expected_rows": len(expected_ids),
+        "canonical_backend": config.judge_backend,
         "canonical_model": config.judge_model,
+        "canonical_model_digest_prefix": config.judge_model_digest_prefix,
         "protocol_version": config.version,
     }
 
