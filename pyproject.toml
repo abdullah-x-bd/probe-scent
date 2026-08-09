@@ -41,6 +41,9 @@ where = ["src"]
 line-length = 100
 target-version = "py311"
 
+[tool.ruff.lint]
+ignore = ["RUF046"]
+
 [tool.mypy]
 python_version = "3.11"
 strict = true
