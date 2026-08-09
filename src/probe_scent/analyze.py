@@ -132,13 +132,39 @@ def analyze(
     attempts = read_attempts(raw_path)
     canonical = canonicalize_attempts(attempts)
     dataset = pd.DataFrame([s.model_dump() for s in read_scenarios(dataset_path)])
+    provenance_columns = [
+        "scenario_id",
+        "score",
+        "confidence",
+        "judge_backend",
+        "backend_version",
+        "requested_model",
+        "response_model",
+        "model_digest",
+        "model_size_bytes",
+        "response_created_at",
+        "total_duration_ns",
+        "prompt_eval_count",
+        "eval_count",
+        "prompt_sha256",
+        "dataset_sha256",
+        "run_order_sha256",
+        "protocol_version",
+        "temperature",
+        "inference_seed",
+        "context_length",
+        "think",
+        "run_id",
+    ]
+    missing_provenance = [column for column in provenance_columns if column not in canonical.columns]
+    if missing_provenance:
+        raise ValueError(f"Raw results missing provenance columns: {missing_provenance}")
     merged = dataset.merge(
-        canonical[[
-            "scenario_id", "score", "confidence", "requested_model", "response_model",
-            "response_id", "prompt_sha256", "dataset_sha256", "run_order_sha256",
-            "protocol_version", "run_id",
-        ]],
-        left_on="id", right_on="scenario_id", how="left", validate="one_to_one",
+        canonical[provenance_columns],
+        left_on="id",
+        right_on="scenario_id",
+        how="left",
+        validate="one_to_one",
     )
     merged["score"] = pd.to_numeric(merged["score"], errors="coerce")
     complete_rows = int(merged["score"].notna().sum())
@@ -147,9 +173,11 @@ def analyze(
     tables.mkdir(parents=True, exist_ok=True)
     canonical.to_json(output_dir / "canonical_results.jsonl", orient="records", lines=True)
 
-    summary = merged.groupby("condition", observed=False)["score"].agg(
-        ["count", "mean", "std", "median", "min", "max"]
-    ).reset_index()
+    summary = (
+        merged.groupby("condition", observed=False)["score"]
+        .agg(["count", "mean", "std", "median", "min", "max"])
+        .reset_index()
+    )
     q = merged.groupby("condition", observed=False)["score"].quantile([0.25, 0.75]).unstack()
     q.columns = ["q25", "q75"]
     summary = summary.merge(q.reset_index(), on="condition", how="left")
@@ -160,42 +188,56 @@ def analyze(
     effects: dict[str, Any] = {}
     for index, (name, (high, low)) in enumerate(CONTRASTS.items()):
         effects[name] = paired_effect(
-            wide, high, low, bootstrap_samples, bootstrap_seed + index,
-            permutation_samples, permutation_seed + index,
+            wide,
+            high,
+            low,
+            bootstrap_samples,
+            bootstrap_seed + index,
+            permutation_samples,
+            permutation_seed + index,
         )
 
-    interaction_rows = wide[[
-        "neat_temptation", "messy_temptation", "benign_neat", "control"
-    ]].dropna()
+    interaction_rows = wide[
+        ["neat_temptation", "messy_temptation", "benign_neat", "control"]
+    ].dropna()
     interaction_values = (
-        interaction_rows["neat_temptation"] - interaction_rows["messy_temptation"]
-        - interaction_rows["benign_neat"] + interaction_rows["control"]
+        interaction_rows["neat_temptation"]
+        - interaction_rows["messy_temptation"]
+        - interaction_rows["benign_neat"]
+        + interaction_rows["control"]
     ).to_numpy(dtype=float)
     int_low, int_high = bootstrap_ci(interaction_values, bootstrap_samples, bootstrap_seed + 99)
     effects["interaction"] = {
         "n_pairs": len(interaction_values),
-        "mean_difference_in_differences": float(np.mean(interaction_values))
-        if len(interaction_values) else float("nan"),
-        "median_difference_in_differences": float(np.median(interaction_values))
-        if len(interaction_values) else float("nan"),
+        "mean_difference_in_differences": (
+            float(np.mean(interaction_values)) if len(interaction_values) else float("nan")
+        ),
+        "median_difference_in_differences": (
+            float(np.median(interaction_values)) if len(interaction_values) else float("nan")
+        ),
         "ci95_low": int_low,
         "ci95_high": int_high,
         "permutation_p": sign_flip_pvalue(
             interaction_values, permutation_samples, permutation_seed + 99
         ),
     }
-    pd.DataFrame.from_dict(effects, orient="index").reset_index(
-        names="contrast"
-    ).to_csv(tables / "paired_effects.csv", index=False)
+    (
+        pd.DataFrame.from_dict(effects, orient="index")
+        .reset_index(names="contrast")
+        .to_csv(tables / "paired_effects.csv", index=False)
+    )
 
     pair_meta = merged[["pair_id", "domain"]].drop_duplicates()
     pair_scores = wide.reset_index().merge(pair_meta, on="pair_id", how="left")
     pair_scores["primary_effect"] = (
         pair_scores["neat_temptation"] - pair_scores["messy_temptation"]
     )
-    domain_effects = pair_scores.groupby("domain", observed=False)["primary_effect"].agg(
-        ["count", "mean", "std", "median", "min", "max"]
-    ).reset_index().sort_values("domain")
+    domain_effects = (
+        pair_scores.groupby("domain", observed=False)["primary_effect"]
+        .agg(["count", "mean", "std", "median", "min", "max"])
+        .reset_index()
+        .sort_values("domain")
+    )
     domain_effects.to_csv(tables / "domain_effects.csv", index=False)
 
     sensitivity_rows: list[dict[str, Any]] = []
@@ -203,36 +245,49 @@ def analyze(
         vals = pair_scores.loc[
             pair_scores["domain"] != domain, "primary_effect"
         ].dropna().to_numpy()
-        sensitivity_rows.append({
-            "analysis": "leave_one_domain_out", "excluded": domain,
-            "n_pairs": len(vals),
-            "mean_primary_effect": float(np.mean(vals)) if len(vals) else float("nan"),
-        })
+        sensitivity_rows.append(
+            {
+                "analysis": "leave_one_domain_out",
+                "excluded": domain,
+                "n_pairs": len(vals),
+                "mean_primary_effect": float(np.mean(vals)) if len(vals) else float("nan"),
+            }
+        )
     for pair_id in pair_scores["pair_id"]:
         vals = pair_scores.loc[
             pair_scores["pair_id"] != pair_id, "primary_effect"
         ].dropna().to_numpy()
-        sensitivity_rows.append({
-            "analysis": "leave_one_pair_out", "excluded": pair_id,
-            "n_pairs": len(vals),
-            "mean_primary_effect": float(np.mean(vals)) if len(vals) else float("nan"),
-        })
+        sensitivity_rows.append(
+            {
+                "analysis": "leave_one_pair_out",
+                "excluded": pair_id,
+                "n_pairs": len(vals),
+                "mean_primary_effect": float(np.mean(vals)) if len(vals) else float("nan"),
+            }
+        )
     pd.DataFrame(sensitivity_rows).to_csv(tables / "sensitivity.csv", index=False)
 
     claims = {
         "H1_neat_vs_messy": {
-            "status": "SUPPORTED" if effects["primary_neat_minus_messy"]["ci95_low"] > 0
-            else "NOT_SUPPORTED",
+            "status": (
+                "SUPPORTED"
+                if effects["primary_neat_minus_messy"]["ci95_low"] > 0
+                else "NOT_SUPPORTED"
+            ),
             **effects["primary_neat_minus_messy"],
         },
         "H2_neatness_by_temptation_interaction": {
-            "status": "SUPPORTED" if effects["interaction"]["ci95_low"] > 0
-            else "NOT_SUPPORTED",
+            "status": (
+                "SUPPORTED" if effects["interaction"]["ci95_low"] > 0 else "NOT_SUPPORTED"
+            ),
             **effects["interaction"],
         },
         "H3_positive_control": {
-            "status": "SUPPORTED" if effects["explicit_minus_control"]["ci95_low"] > 0
-            else "NOT_SUPPORTED",
+            "status": (
+                "SUPPORTED"
+                if effects["explicit_minus_control"]["ci95_low"] > 0
+                else "NOT_SUPPORTED"
+            ),
             **effects["explicit_minus_control"],
         },
     }
@@ -265,7 +320,8 @@ def main() -> None:
     args = parser.parse_args()
     config = load_config(Path(args.config))
     result = analyze(
-        raw_path=Path(args.raw), dataset_path=Path(config.canonical_dataset_path),
+        raw_path=Path(args.raw),
+        dataset_path=Path(config.canonical_dataset_path),
         output_dir=Path(args.output_dir),
         bootstrap_samples=config.analysis.bootstrap_samples,
         bootstrap_seed=config.analysis.bootstrap_seed,
