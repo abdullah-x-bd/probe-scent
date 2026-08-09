@@ -50,7 +50,7 @@ class OllamaBackend:
             method=method,
         )
         try:
-            with urlopen(request, timeout=timeout) as response:  # noqa: S310
+            with urlopen(request, timeout=timeout) as response:
                 return json.loads(response.read().decode("utf-8"))
         except (HTTPError, URLError, TimeoutError) as exc:
             raise RuntimeError(f"Ollama request failed for {path}: {exc}") from exc
