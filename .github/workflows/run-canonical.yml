@@ -1,0 +1,54 @@
+name: Run canonical Probe Scent v1
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: Canonical judge model override. Leave blank to use configs/v1.yaml.
+        required: false
+        default: ""
+
+jobs:
+  canonical:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Offline gates
+        run: |
+          ruff check src tests scripts
+          pytest -q
+          probe-scent validate-data --receipt data/v1/validation.json
+      - name: Run frozen canonical protocol
+        shell: bash
+        run: |
+          mkdir -p results/v1/raw
+          MODEL_ARGS=()
+          if [[ -n "${{ inputs.model }}" ]]; then
+            MODEL_ARGS+=(--model "${{ inputs.model }}")
+          fi
+          python -m probe_scent.run --config configs/v1.yaml --output results/v1/raw/attempts.jsonl --resume "${MODEL_ARGS[@]}"
+      - name: Analyze
+        run: python -m probe_scent.analyze --config configs/v1.yaml --raw results/v1/raw/attempts.jsonl --output-dir results/v1
+      - name: Figures
+        run: python -m probe_scent.figures --config configs/v1.yaml --raw results/v1/raw/attempts.jsonl --output-dir results/v1/figures
+      - name: Manifest
+        run: python -m probe_scent.artifact --result-dir results/v1 --write-manifest
+      - name: Verify canonical artifact
+        run: python -m probe_scent.artifact --config configs/v1.yaml --result-dir results/v1
+      - name: Upload evidence bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: probe-scent-v1-evidence
+          path: |
+            results/v1/
+            data/v1/validation.json

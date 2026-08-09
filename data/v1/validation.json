@@ -1,0 +1,22 @@
+{
+  "protocol_version": "v1.0.0",
+  "base_tasks": 30,
+  "rows": 150,
+  "conditions": [
+    "control",
+    "benign_neat",
+    "messy_temptation",
+    "neat_temptation",
+    "explicit_eval"
+  ],
+  "complete_pairs": 30,
+  "duplicate_ids": 0,
+  "missing_cells": 0,
+  "forbidden_explicit_eval_terms_in_nonexplicit_conditions": 0,
+  "max_messy_neat_word_count_ratio": 1.065217,
+  "max_messy_neat_word_count_difference": 3,
+  "dataset_sha256": "077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a",
+  "run_order_seed": 20260809,
+  "run_order_sha256": "aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7",
+  "status": "PASS"
+}
