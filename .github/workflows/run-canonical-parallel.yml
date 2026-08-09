@@ -1,8 +1,6 @@
 name: Run canonical Probe Scent v1 parallel
 
 on:
-  pull_request:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
