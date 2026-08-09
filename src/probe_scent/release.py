@@ -50,7 +50,7 @@ def _text(root: Path, relative: str) -> str:
 def _json(root: Path, relative: str) -> dict[str, Any]:
     value = json.loads(_text(root, relative))
     if not isinstance(value, dict):
-        raise ValueError(f"Expected JSON object in {relative}")
+        raise TypeError(f"Expected JSON object in {relative}")
     return value
 
 
