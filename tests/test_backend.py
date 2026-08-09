@@ -1,5 +1,5 @@
 import json
-from typing import Any
+from typing import Any, Self
 
 from probe_scent.backends import OllamaBackend
 from probe_scent.schemas import Scenario
@@ -9,7 +9,7 @@ class _FakeResponse:
     def __init__(self, payload: dict[str, Any]) -> None:
         self.payload = payload
 
-    def __enter__(self) -> "_FakeResponse":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *_args: object) -> None:
