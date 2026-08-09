@@ -2,11 +2,8 @@ name: Run canonical Probe Scent v1
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - agent/probe-scent-v1-hardening
-    paths:
-      - canonical-trigger.txt
+  pull_request:
+    branches: [main]
 
 permissions:
   contents: write
@@ -17,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: agent/probe-scent-v1-hardening
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -104,7 +101,7 @@ jobs:
             echo "No new raw attempts to persist."
           else
             git commit -m "Record Probe Scent v1 canonical raw attempts [skip ci]"
-            git push origin "HEAD:${{ github.ref_name }}"
+            git push origin HEAD:agent/probe-scent-v1-hardening
           fi
 
       - name: Require all 150 canonical results before analysis
@@ -157,7 +154,7 @@ jobs:
             echo "Verified evidence already committed."
           else
             git commit -m "Record verified Probe Scent v1 evidence [skip ci]"
-            git push origin "HEAD:${{ github.ref_name }}"
+            git push origin HEAD:agent/probe-scent-v1-hardening
           fi
 
       - name: Upload evidence bundle
