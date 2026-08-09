@@ -1,0 +1,188 @@
+name: Run canonical Probe Scent v1 parallel
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  EVIDENCE_BRANCH: agent/probe-scent-v1-parallel-evidence
+
+jobs:
+  shard:
+    name: canonical-shard-${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/probe-scent-v1-hardening
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Offline gates
+        run: |
+          ruff check src tests scripts
+          pytest -q
+          probe-scent validate-data --receipt /tmp/validation.json
+          python -m probe_scent.run --config configs/v1.yaml --dry-run
+
+      - name: Install and start Ollama
+        shell: bash
+        run: |
+          curl -fsSL https://ollama.com/install.sh | OLLAMA_NO_START=1 sh
+          nohup ollama serve >/tmp/ollama.log 2>&1 &
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:11434/api/version >/dev/null 2>&1; then
+              ready=1
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" != "1" ]]; then
+            cat /tmp/ollama.log || true
+            exit 1
+          fi
+          ollama pull qwen3.5:4b-q4_K_M
+
+      - name: Verify frozen backend identity
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from probe_scent.backends import OllamaBackend
+          from probe_scent.config import load_config
+          config = load_config(Path("configs/v1.yaml"))
+          print(OllamaBackend().identity(config.judge_model, config.judge_model_digest_prefix))
+          PY
+
+      - name: Run 30-cell frozen shard
+        shell: bash
+        run: |
+          OFFSET=$(( ${{ matrix.shard }} * 30 ))
+          mkdir -p shard-output
+          python -m probe_scent.run \
+            --config configs/v1.yaml \
+            --output "shard-output/shard_${{ matrix.shard }}.jsonl" \
+            --offset "$OFFSET" \
+            --limit 30
+
+      - name: Validate shard completeness
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("shard-output/shard_${{ matrix.shard }}.jsonl")
+          rows = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+          latest = {}
+          for row in rows:
+              latest[row["scenario_id"]] = row
+          valid = [row for row in latest.values() if row.get("status") == "ok" and isinstance(row.get("score"), int)]
+          print(f"valid={len(valid)}/30")
+          if len(valid) != 30:
+              raise SystemExit("Shard incomplete")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-scent-v1-shard-${{ matrix.shard }}
+          path: shard-output/shard_${{ matrix.shard }}.jsonl
+
+  aggregate:
+    name: aggregate-and-verify
+    needs: shard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: agent/probe-scent-v1-hardening
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: probe-scent-v1-shard-*
+          path: downloaded-shards
+
+      - name: Assemble append-only canonical raw file
+        shell: bash
+        run: |
+          mkdir -p results/v1/raw
+          : > results/v1/raw/attempts.jsonl
+          for shard in 0 1 2 3 4; do
+            cat "downloaded-shards/probe-scent-v1-shard-${shard}/shard_${shard}.jsonl" >> results/v1/raw/attempts.jsonl
+          done
+
+      - name: Require all 150 canonical results
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from probe_scent.config import load_config
+          from probe_scent.dataset import read_scenarios
+          from probe_scent.run import load_latest_attempts
+          config = load_config(Path("configs/v1.yaml"))
+          expected = {row.id for row in read_scenarios(Path(config.dataset_path))}
+          latest = load_latest_attempts(Path("results/v1/raw/attempts.jsonl"))
+          valid = {sid for sid, row in latest.items() if row.get("status") == "ok" and isinstance(row.get("score"), int)}
+          print(f"valid={len(valid)}/{len(expected)}")
+          if valid != expected:
+              raise SystemExit(f"Canonical set mismatch: missing={len(expected-valid)} extra={len(valid-expected)}")
+          PY
+
+      - name: Generate canonical evidence
+        run: |
+          probe-scent validate-data --receipt data/v1/validation.json
+          python -m probe_scent.analyze --config configs/v1.yaml --raw results/v1/raw/attempts.jsonl --output-dir results/v1
+          python -m probe_scent.figures --config configs/v1.yaml --raw results/v1/raw/attempts.jsonl --output-dir results/v1/figures
+          python -m probe_scent.artifact --result-dir results/v1 --write-manifest
+          python -m probe_scent.artifact --config configs/v1.yaml --result-dir results/v1 | tee results/v1/verification.json
+
+      - name: Require PASS receipt
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          receipt = json.loads(Path("results/v1/verification.json").read_text())
+          if receipt.get("status") != "PASS":
+              raise SystemExit(receipt)
+          print("CANONICAL ARTIFACT VERIFIED")
+          PY
+
+      - name: Commit verified evidence to evidence branch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/v1 data/v1/validation.json
+          git commit -m "Record verified Probe Scent v1 parallel evidence [skip ci]"
+          git push --force-with-lease origin HEAD:${EVIDENCE_BRANCH}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: probe-scent-v1-verified-evidence
+          path: |
+            results/v1/
+            data/v1/validation.json
