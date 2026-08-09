@@ -17,13 +17,18 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: Install
+      - name: Install frozen environment
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          python -m pip install -r requirements-lock.txt
+          python -m pip install -e . --no-deps
+          python -m pip check
 
       - name: Lint
         run: ruff check src tests scripts
+
+      - name: Type check
+        run: mypy src/probe_scent
 
       - name: Tests
         run: pytest -q
@@ -31,11 +36,14 @@ jobs:
       - name: Validate frozen dataset
         run: probe-scent validate-data --receipt /tmp/probe-scent-validation.json
 
+      - name: Audit release contract
+        run: probe-scent audit-release
+
       - name: Validate repository lifecycle state
         shell: bash
         run: |
           if [[ -f results/v1/raw/attempts.jsonl ]]; then
-            echo "Canonical evidence exists; verifying the completed artifact."
+            echo "Canonical evidence exists; regenerating and verifying the completed artifact."
             python -m probe_scent.artifact \
               --config configs/v1.yaml \
               --result-dir results/v1
@@ -43,3 +51,10 @@ jobs:
             echo "Canonical evidence is absent; validating the frozen pre-run plan."
             python -m probe_scent.run --config configs/v1.yaml --dry-run
           fi
+
+      - name: Build wheel smoke test
+        shell: bash
+        run: |
+          rm -rf /tmp/probe-scent-wheel
+          python -m pip wheel . --no-deps --wheel-dir /tmp/probe-scent-wheel
+          test "$(find /tmp/probe-scent-wheel -maxdepth 1 -name 'probe_scent-*.whl' | wc -l)" -eq 1
