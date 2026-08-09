@@ -36,14 +36,23 @@ This distinguishes a temptation-specific neatness effect from a generic preferen
 
 ## Frozen protocol
 
-The protocol was frozen before the canonical v1 model run.
+The protocol is frozen before the canonical v1 inference run.
 
+- backend: `ollama`
+- model: `qwen3.5:4b-q4_K_M`
+- model digest prefix: `2a654d98e6fb`
+- temperature: `0.0`
+- inference seed: `20260809`
+- context length: `2048`
+- thinking: disabled
 - dataset SHA-256: `077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a`
 - run-order SHA-256: `aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7`
 - run-order seed: `20260809`
 - complete matched pairs: `30 / 30`
 - direct evaluation-cue leakage in non-explicit conditions: `0`
 - maximum messy/neat word-count difference: `3`
+
+The canonical backend is intentionally local and open. The experiment needs no paid inference API and the raw evidence records the exact pulled model digest and Ollama version.
 
 The manual pair audit is committed at `data/v1/pair_audit.json`. The automated validation receipt is at `data/v1/validation.json`.
 
@@ -63,7 +72,7 @@ The last command intentionally reports `INCOMPLETE` until genuine canonical mode
 
 ## Canonical live run
 
-The manual GitHub Actions workflow `.github/workflows/run-canonical.yml` executes the frozen model protocol using the repository secret `OPENAI_API_KEY`.
+The GitHub Actions workflow `.github/workflows/run-canonical.yml` installs Ollama, pulls the frozen Qwen model, verifies the model digest before inference, and runs the 150 canonical scenarios on a standard public runner. No API key is required.
 
 It is designed to be interruption-safe:
 
@@ -72,7 +81,7 @@ It is designed to be interruption-safe:
 3. a rerun uses resume mode and executes only missing IDs;
 4. analysis is blocked until all 150 canonical scenarios have valid results;
 5. tables, claims, sensitivity analyses, figures and a SHA-256 manifest are generated automatically;
-6. the artifact verifier rejects the evidence if the model, prompt, protocol, dataset or run-order provenance differs from the frozen configuration;
+6. the artifact verifier rejects evidence if the backend, model, model digest, prompt, inference settings, protocol, dataset or run-order provenance differs from the frozen configuration;
 7. only a verified evidence bundle is committed as canonical evidence.
 
 ## Analysis
@@ -95,7 +104,7 @@ The canonical analysis includes:
 configs/                    frozen protocol configuration
 data/v1/                    base tasks, canonical dataset, run order, validation and manual audit
 docs/                       protocol, dataset card, pilot history, claims and limitations
-src/probe_scent/            runner, schemas, analysis, figures and artifact verifier
+src/probe_scent/            backend, runner, schemas, analysis, figures and artifact verifier
 scripts/                     deterministic canonical-data generator
 results/v1/                 canonical evidence location
 tests/                       offline scientific and pipeline tests
@@ -111,6 +120,6 @@ tests/                       offline scientific and pipeline tests
 - `docs/LIMITATIONS.md` records the benchmark's major limitations.
 - `docs/REPRODUCIBILITY.md` gives the exact reproduction workflow.
 
-## Current evidence status
+## Evidence status
 
-The confirmatory v1 design and offline artifact are frozen and validated. The live canonical model evidence is only canonical once `results/v1/MANIFEST.json` exists and `probe-scent verify-artifact` returns `PASS`.
+The confirmatory v1 design is frozen and validated. Canonical model evidence is only accepted once `results/v1/MANIFEST.json` exists and `probe-scent verify-artifact` returns `PASS`.
