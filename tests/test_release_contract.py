@@ -2,7 +2,6 @@ from pathlib import Path
 
 from probe_scent.release import audit_release
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
