@@ -12,18 +12,34 @@ jobs:
         python-version: ["3.11", "3.12"]
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+
       - name: Install
         run: |
           python -m pip install --upgrade pip
           pip install -e ".[dev]"
+
       - name: Lint
         run: ruff check src tests scripts
+
       - name: Tests
         run: pytest -q
+
       - name: Validate frozen dataset
         run: probe-scent validate-data --receipt /tmp/probe-scent-validation.json
-      - name: Confirm canonical run can be planned without network
-        run: python -m probe_scent.run --config configs/v1.yaml --dry-run
+
+      - name: Validate repository lifecycle state
+        shell: bash
+        run: |
+          if [[ -f results/v1/raw/attempts.jsonl ]]; then
+            echo "Canonical evidence exists; verifying the completed artifact."
+            python -m probe_scent.artifact \
+              --config configs/v1.yaml \
+              --result-dir results/v1
+          else
+            echo "Canonical evidence is absent; validating the frozen pre-run plan."
+            python -m probe_scent.run --config configs/v1.yaml --dry-run
+          fi
