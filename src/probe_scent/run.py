@@ -5,7 +5,7 @@ import json
 import os
 import random
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -159,7 +159,7 @@ def main() -> None:
 
     client = OpenAI()
     model = args.model or config.judge_model
-    run_id = f"{config.version}-{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}"
+    run_id = f"{config.version}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     p_hash = prompt_sha256()
 
     for scenario in scenarios:
@@ -170,7 +170,7 @@ def main() -> None:
 
         last_error: str | None = None
         for retry_index in range(config.retry.max_attempts):
-            started = datetime.now(timezone.utc).isoformat()
+            started = datetime.now(UTC).isoformat()
             try:
                 parsed, response_meta = run_one(
                     client=client,
@@ -201,14 +201,14 @@ def main() -> None:
                     "protocol_version": config.version,
                     "run_id": run_id,
                     "started_at_utc": started,
-                    "finished_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
                     "run_error": None,
                 }
                 append_jsonl(output_path, row)
                 latest[scenario.id] = row
                 print(f"{scenario.id} score={parsed.score}")
                 break
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 last_error = repr(exc)
                 row = {
                     "scenario_id": scenario.id,
@@ -233,7 +233,7 @@ def main() -> None:
                     "protocol_version": config.version,
                     "run_id": run_id,
                     "started_at_utc": started,
-                    "finished_at_utc": datetime.now(timezone.utc).isoformat(),
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
                     "run_error": last_error,
                 }
                 append_jsonl(output_path, row)
