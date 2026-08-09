@@ -31,7 +31,7 @@ def test_ollama_identity_and_structured_judge_payload(monkeypatch: Any) -> None:
                 "models": [{
                     "name": "qwen3.5:4b-q4_K_M",
                     "model": "qwen3.5:4b-q4_K_M",
-                    "digest": "2a654d98e6fbabcdef",
+                    "digest": "sha256:2a654d98e6fbabcdef",
                     "size": 3400000000,
                 }]
             })
