@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import random
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from pydantic import ValidationError
 
+from .backends import BackendIdentity, OllamaBackend
 from .config import load_config
 from .dataset import file_sha256, read_scenarios
 from .prompts import JUDGE_SYSTEM_PROMPT, JUDGE_USER_TEMPLATE, prompt_sha256
@@ -66,36 +65,47 @@ def transient_error(exc: Exception) -> bool:
     return any(marker in text for marker in markers)
 
 
+def _backend_identity(config: Any) -> tuple[OllamaBackend, BackendIdentity]:
+    if config.judge_backend != "ollama":
+        raise RuntimeError(f"Unsupported frozen judge backend: {config.judge_backend}")
+    backend = OllamaBackend()
+    identity = backend.identity(config.judge_model, config.judge_model_digest_prefix)
+    return backend, identity
+
+
 def run_one(
-    client: Any,
+    backend: OllamaBackend,
     scenario: Scenario,
-    model: str,
-    max_output_tokens: int,
-) -> tuple[JudgeOutput, dict[str, str | None]]:
+    config: Any,
+) -> tuple[JudgeOutput, dict[str, Any]]:
     user_prompt = JUDGE_USER_TEMPLATE.format(scenario_text=scenario.text)
-    response = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": JUDGE_SYSTEM_PROMPT},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_output_tokens=max_output_tokens,
+    response = backend.judge(
+        scenario=scenario,
+        model=config.judge_model,
+        system_prompt=JUDGE_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_output_tokens=config.max_output_tokens,
+        temperature=config.temperature,
+        seed=config.inference_seed,
+        context_length=config.context_length,
+        think=config.think,
     )
-    parsed = parse_json_object(response.output_text)
-    meta = {
-        "response_id": getattr(response, "id", None),
-        "response_model": getattr(response, "model", None),
-        "raw_output": response.output_text,
+    parsed = parse_json_object(response.content)
+    meta: dict[str, Any] = {
+        "response_model": response.model,
+        "response_created_at": response.created_at,
+        "raw_output": response.content,
+        "total_duration_ns": response.total_duration_ns,
+        "prompt_eval_count": response.prompt_eval_count,
+        "eval_count": response.eval_count,
     }
     return parsed, meta
 
 
 def main() -> None:
-    load_dotenv()
     parser = argparse.ArgumentParser(description="Run the frozen Probe Scent v1 judge protocol.")
     parser.add_argument("--config", default="configs/v1.yaml")
     parser.add_argument("--output", default="results/v1/raw/attempts.jsonl")
-    parser.add_argument("--model", default=None)
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--overwrite", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
@@ -105,11 +115,10 @@ def main() -> None:
 
     config = load_config(Path(args.config))
     input_path = Path(config.dataset_path)
-    expected_run_sha = config.run_order_sha256
     actual_run_sha = file_sha256(input_path)
-    if actual_run_sha != expected_run_sha:
+    if actual_run_sha != config.run_order_sha256:
         raise SystemExit(
-            f"Run-order hash mismatch. Expected {expected_run_sha}, got {actual_run_sha}."
+            f"Run-order hash mismatch. Expected {config.run_order_sha256}, got {actual_run_sha}."
         )
 
     scenarios = read_scenarios(input_path)
@@ -134,14 +143,20 @@ def main() -> None:
     }
 
     if args.dry_run:
-        pending = [s.id for s in scenarios if s.id not in completed]
+        pending = [scenario.id for scenario in scenarios if scenario.id not in completed]
         print(
             json.dumps(
                 {
                     "protocol_version": config.version,
                     "dataset_sha256": config.dataset_sha256,
                     "run_order_sha256": actual_run_sha,
-                    "model": args.model or config.judge_model,
+                    "backend": config.judge_backend,
+                    "model": config.judge_model,
+                    "model_digest_prefix": config.judge_model_digest_prefix,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
                     "selected_rows": len(scenarios),
                     "already_completed": len(completed),
                     "pending": len(pending),
@@ -152,13 +167,7 @@ def main() -> None:
         )
         return
 
-    if not os.getenv("OPENAI_API_KEY"):
-        raise SystemExit("OPENAI_API_KEY is required for a live canonical run.")
-
-    from openai import OpenAI
-
-    client = OpenAI()
-    model = args.model or config.judge_model
+    backend, identity = _backend_identity(config)
     run_id = f"{config.version}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
     p_hash = prompt_sha256()
 
@@ -172,12 +181,7 @@ def main() -> None:
         for retry_index in range(config.retry.max_attempts):
             started = datetime.now(UTC).isoformat()
             try:
-                parsed, response_meta = run_one(
-                    client=client,
-                    scenario=scenario,
-                    model=model,
-                    max_output_tokens=config.max_output_tokens,
-                )
+                parsed, response_meta = run_one(backend, scenario, config)
                 row: dict[str, Any] = {
                     "scenario_id": scenario.id,
                     "pair_id": scenario.pair_id,
@@ -191,14 +195,25 @@ def main() -> None:
                     "label": parsed.label,
                     "primary_cue": parsed.primary_cue,
                     "confidence": parsed.confidence,
-                    "requested_model": model,
+                    "judge_backend": identity.backend,
+                    "backend_version": identity.backend_version,
+                    "requested_model": identity.model,
                     "response_model": response_meta["response_model"],
-                    "response_id": response_meta["response_id"],
+                    "model_digest": identity.model_digest,
+                    "model_size_bytes": identity.model_size_bytes,
+                    "response_created_at": response_meta["response_created_at"],
+                    "total_duration_ns": response_meta["total_duration_ns"],
+                    "prompt_eval_count": response_meta["prompt_eval_count"],
+                    "eval_count": response_meta["eval_count"],
                     "raw_output": response_meta["raw_output"],
                     "prompt_sha256": p_hash,
                     "dataset_sha256": config.dataset_sha256,
                     "run_order_sha256": actual_run_sha,
                     "protocol_version": config.version,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
                     "run_id": run_id,
                     "started_at_utc": started,
                     "finished_at_utc": datetime.now(UTC).isoformat(),
@@ -223,14 +238,25 @@ def main() -> None:
                     "label": None,
                     "primary_cue": None,
                     "confidence": None,
-                    "requested_model": model,
+                    "judge_backend": identity.backend,
+                    "backend_version": identity.backend_version,
+                    "requested_model": identity.model,
                     "response_model": None,
-                    "response_id": None,
+                    "model_digest": identity.model_digest,
+                    "model_size_bytes": identity.model_size_bytes,
+                    "response_created_at": None,
+                    "total_duration_ns": None,
+                    "prompt_eval_count": None,
+                    "eval_count": None,
                     "raw_output": None,
                     "prompt_sha256": p_hash,
                     "dataset_sha256": config.dataset_sha256,
                     "run_order_sha256": actual_run_sha,
                     "protocol_version": config.version,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
                     "run_id": run_id,
                     "started_at_utc": started,
                     "finished_at_utc": datetime.now(UTC).isoformat(),
