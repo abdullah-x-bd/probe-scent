@@ -1,0 +1,13 @@
+{
+  "canonical_results.jsonl": "116878878a406a95b78a90d20f8b3adf61eb3a69f472bcdd4dee66055ce43f74",
+  "claims.json": "35f12097c12562e63f853e835b827469a32f050d3c1bbc744157c4eaefd0fbce",
+  "figures/figure_1_conditions.svg": "18c04bd143ac5166e956860b933c4d649a3ad77d625653e787c08a98c505bf1f",
+  "figures/figure_2_paired.svg": "b053d747cbb4850d6928befcfcbe18a7b1265e33d5336516ce4d520b26062e45",
+  "figures/figure_3_domains.svg": "144ac69a97678276d8b4f35e045eff961a2704d7f0b44db7ab39bbba1aea85e6",
+  "raw/attempts.jsonl": "4d6d62b035f70e6e21802caa17b3bc6657e152d488eaac8855be8c08551ee229",
+  "summary.json": "97c5d05f362e9f66aa688823c935c40b8affc2654a129c19bd0be51b7e0daaf8",
+  "tables/condition_summary.csv": "53259e27a122c9dc52d798cb5549e8fc9e4d23a254e967e6f1384dd74f632249",
+  "tables/domain_effects.csv": "8aaaa75dbc1244d42d81c98e717f8c60c42577e8d75320fc92951d5223703b44",
+  "tables/paired_effects.csv": "04826af4c142978fbe469e1970d7e2b741f0cb1c3bf35178a3200f24ac198275",
+  "tables/sensitivity.csv": "dd44958e38a61e7785c286fb6d9594b8a06374d26be202773c03eb7d6b4ea84d"
+}

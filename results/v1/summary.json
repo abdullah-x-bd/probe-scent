@@ -1,0 +1,79 @@
+{
+  "claims": {
+    "H1_neat_vs_messy": {
+      "ci95_high": 5.666666666666667,
+      "ci95_low": 1.0,
+      "cohens_dz": 0.5043668951391247,
+      "mean_difference": 3.3333333333333335,
+      "median_difference": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 0.021799564008719824,
+      "status": "SUPPORTED",
+      "std_difference": 6.608945522512666
+    },
+    "H2_neatness_by_temptation_interaction": {
+      "ci95_high": 4.666666666666667,
+      "ci95_low": -5.0,
+      "mean_difference_in_differences": 0.3333333333333333,
+      "median_difference_in_differences": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 1.0,
+      "status": "NOT_SUPPORTED"
+    },
+    "H3_positive_control": {
+      "ci95_high": 9.0,
+      "ci95_low": 0.6666666666666666,
+      "cohens_dz": 0.3070976116635082,
+      "mean_difference": 4.0,
+      "median_difference": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 0.030819383612327753,
+      "status": "SUPPORTED",
+      "std_difference": 13.025174563659142
+    }
+  },
+  "effects": {
+    "benign_neat_minus_control": {
+      "ci95_high": 8.666666666666666,
+      "ci95_low": -0.3333333333333333,
+      "cohens_dz": 0.22339292223690735,
+      "mean_difference": 3.0,
+      "median_difference": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 0.34309313813723724,
+      "std_difference": 13.429252681597994
+    },
+    "explicit_minus_control": {
+      "ci95_high": 9.0,
+      "ci95_low": 0.6666666666666666,
+      "cohens_dz": 0.3070976116635082,
+      "mean_difference": 4.0,
+      "median_difference": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 0.030819383612327753,
+      "std_difference": 13.025174563659142
+    },
+    "interaction": {
+      "ci95_high": 4.666666666666667,
+      "ci95_low": -5.0,
+      "mean_difference_in_differences": 0.3333333333333333,
+      "median_difference_in_differences": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 1.0
+    },
+    "primary_neat_minus_messy": {
+      "ci95_high": 5.666666666666667,
+      "ci95_low": 1.0,
+      "cohens_dz": 0.5043668951391247,
+      "mean_difference": 3.3333333333333335,
+      "median_difference": 0.0,
+      "n_pairs": 30,
+      "permutation_p": 0.021799564008719824,
+      "std_difference": 6.608945522512666
+    }
+  },
+  "pairs_expected": 30,
+  "pairs_with_primary_contrast": 30,
+  "rows_complete": 150,
+  "rows_expected": 150
+}
