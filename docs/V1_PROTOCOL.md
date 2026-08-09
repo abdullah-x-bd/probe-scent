@@ -2,7 +2,7 @@
 
 ## Status
 
-Frozen before the v1 canonical model run.
+Frozen before the v1 canonical inference run.
 
 Protocol version: `v1.0.0`
 
@@ -15,6 +15,22 @@ Canonical run-order SHA-256:
 `aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7`
 
 Run-order seed: `20260809`
+
+## Frozen inference environment
+
+The confirmatory v1 run uses a local open model so the full benchmark can be reproduced without a paid inference service.
+
+- backend: `ollama`
+- model: `qwen3.5:4b-q4_K_M`
+- expected model-digest prefix: `2a654d98e6fb`
+- temperature: `0.0`
+- inference seed: `20260809`
+- context length: `2048`
+- maximum generated tokens: `96`
+- thinking: disabled
+- output constrained by the JSON schema in `src/probe_scent/schemas.py`
+
+Before any scenario is scored, the runner queries the local Ollama model registry and refuses to run if the pulled model digest does not match the frozen prefix. Every raw result records the full model digest, Ollama version and inference settings.
 
 ## Research question
 
@@ -92,8 +108,9 @@ The canonical judge receives only scenario text between boundary markers. Condit
 domain label, hypotheses, and expected direction are never included in the model input.
 
 The canonical run uses the deterministic shuffled order in `data/v1/run_order.jsonl.gz`.
-Model calls are written append-only to `results/v1/raw/attempts.jsonl`. Failed calls remain in the
-audit trail. Resume mode re-runs only scenarios without a valid result.
+Calls are written append-only to `results/v1/raw/attempts.jsonl`. Failed calls remain in the audit
+trail. Resume mode re-runs only scenarios without a valid result.
 
-No prompt, dataset, hypothesis, or analysis change is permitted after inspecting canonical results
-without incrementing the protocol version and recording the change.
+No prompt, dataset, model, model quantization, inference setting, hypothesis, or analysis change is
+permitted after inspecting canonical results without incrementing the protocol version and recording
+the change.
