@@ -1,103 +1,150 @@
 # Reproducibility
 
-## Offline validation
+Probe Scent v1 is a completed, frozen research artifact. The committed raw evidence, derived statistics, figures, manifest, and verification receipt can be checked without rerunning model inference.
 
-A fresh checkout can verify the complete frozen research design without network access or an API key after dependencies are installed.
+## Environment
+
+The closest reproduction of the validated Python environment uses the committed dependency lock:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-pip install -e ".[dev]"
-pytest -q
-probe-scent validate-data
-python -m probe_scent.run --config configs/v1.yaml --dry-run
+python -m pip install -r requirements-lock.txt
+python -m pip install -e . --no-deps
 ```
 
-The dataset validator checks pair completeness, duplicate IDs, direct evaluation-cue leakage, primary-pair tempting-file identity and the frozen logical dataset hash.
+The lock captures the Python runtime and development dependency versions used by the successful GitHub Actions release gate on Python 3.11 and 3.12. The canonical model artifact is pinned separately by its Ollama model digest in `configs/v1.yaml`.
 
-The canonical dataset and shuffled run order are reproducibly compressed with gzip `mtime=0`. Their protocol hashes are computed over the decompressed JSONL bytes, so recompression does not redefine the logical research artifact.
+## Verify the completed artifact
 
-Regenerate the frozen data from the 30 structured base tasks with:
+A fresh checkout can validate the frozen data and regenerate the committed evidence from raw model outputs:
+
+```bash
+ruff check src tests scripts
+mypy src/probe_scent
+pytest -q
+probe-scent validate-data --receipt /tmp/probe-scent-validation.json
+probe-scent audit-release
+python -m probe_scent.artifact \
+  --config configs/v1.yaml \
+  --result-dir results/v1
+```
+
+The final command regenerates the canonical analysis and figures in a temporary directory and compares their SHA-256 hashes with the committed evidence. A valid checkout returns `PASS`.
+
+## Regenerate the frozen dataset
+
+The canonical scenarios are generated deterministically from `data/v1/base_tasks.json`:
 
 ```bash
 python scripts/generate_v1.py
+probe-scent validate-data --receipt /tmp/probe-scent-validation.json
 ```
 
-The resulting logical hashes must be:
+The canonical dataset and shuffled run order are gzip-compressed with `mtime=0`. Protocol hashes are computed over the decompressed JSONL bytes, so recompression does not redefine the logical research artifact.
+
+The required logical hashes are:
 
 ```text
 scenarios  077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a
 run order  aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7
 ```
 
-## Live canonical run
+The validator checks:
 
-The live run requires an OpenAI API key and uses the model frozen in `configs/v1.yaml`.
+- exactly 150 canonical scenarios;
+- 30 complete matched base tasks;
+- duplicate and missing IDs;
+- primary-pair tempting-file identity;
+- direct evaluation-language leakage in non-explicit conditions;
+- messy/neat length balance;
+- the frozen canonical dataset hash.
 
-```bash
-export OPENAI_API_KEY=...
-python -m probe_scent.run \
-  --config configs/v1.yaml \
-  --output results/v1/raw/attempts.jsonl
+## Canonical inference environment
+
+The frozen v1 inference configuration is:
+
+```text
+backend        ollama
+model          qwen3.5:4b-q4_K_M
+model digest   prefix 2a654d98e6fb
+temperature    0.0
+seed           20260809
+context        2048
+thinking       disabled
+max tokens     96
 ```
 
-If interrupted, continue without re-running valid scenarios:
+Install Ollama using its official installer for your platform, then pull the frozen model:
+
+```bash
+ollama pull qwen3.5:4b-q4_K_M
+ollama list
+```
+
+Before inference, Probe Scent queries the local Ollama registry and refuses to run if the pulled model digest does not begin with the frozen prefix. Every raw result stores the full model digest, Ollama version, inference settings, prompt hash, dataset hash, run-order hash, run ID, and timestamps.
+
+## Sequential canonical rerun
+
+The canonical evidence is already frozen, so rerunning inference creates a replication and must not overwrite `results/v1` on the release line. To reproduce the execution behavior in a separate output path:
 
 ```bash
 python -m probe_scent.run \
   --config configs/v1.yaml \
-  --output results/v1/raw/attempts.jsonl \
+  --output /tmp/probe-scent-replication.jsonl
+```
+
+If interrupted:
+
+```bash
+python -m probe_scent.run \
+  --config configs/v1.yaml \
+  --output /tmp/probe-scent-replication.jsonl \
   --resume
 ```
 
-The runner refuses to overwrite an existing evidence file unless `--overwrite` is explicitly supplied.
+The runner is append-only and refuses to overwrite an existing file unless `--overwrite` is explicitly supplied.
 
-## Analysis
+## Historical canonical execution
 
-Only after all 150 canonical scenario IDs have valid raw outputs:
+The committed v1 evidence was executed as five independent 30-cell shards using the identical frozen configuration. Every shard had to contain 30 valid scenario IDs before upload. The aggregation job then required the exact 150-ID canonical set before analysis was allowed to run.
+
+The two workflows remain in `.github/workflows/` for reproducibility:
+
+- `run-canonical.yml` executes the sequential protocol;
+- `run-canonical-parallel.yml` executes the five-shard protocol.
+
+Both are manual-only after the evidence freeze. Ordinary pushes and pull requests cannot rerun canonical inference.
+
+## Recompute analysis from committed raw evidence
 
 ```bash
 python -m probe_scent.analyze \
   --config configs/v1.yaml \
   --raw results/v1/raw/attempts.jsonl \
-  --output-dir results/v1
+  --output-dir /tmp/probe-scent-analysis
 
 python -m probe_scent.figures \
   --config configs/v1.yaml \
   --raw results/v1/raw/attempts.jsonl \
-  --output-dir results/v1/figures
-
-python -m probe_scent.artifact \
-  --result-dir results/v1 \
-  --write-manifest
+  --output-dir /tmp/probe-scent-analysis/figures
 ```
 
-## Final verification
+The authoritative committed outputs are under `results/v1/`. Do not rewrite them in place for exploratory analysis.
 
-```bash
-python -m probe_scent.artifact \
-  --config configs/v1.yaml \
-  --result-dir results/v1
-```
+## Artifact verification contract
 
 A canonical `PASS` requires:
 
 - all 150 expected scenario IDs;
-- the frozen dataset hash;
-- the frozen shuffled run-order hash;
-- the frozen prompt hash;
-- the frozen protocol version;
-- the frozen requested model;
-- a passing 30-pair manual audit receipt;
+- the frozen dataset and run-order hashes;
+- the frozen prompt hash and protocol version;
+- the frozen Ollama backend, requested model, model digest prefix, and inference settings;
+- one consistent backend version and model digest across the canonical evidence;
+- the passing 30-pair manual audit receipt;
 - all expected analysis tables and figures;
 - a valid SHA-256 manifest;
-- exact regeneration of the committed derived evidence.
+- exact regeneration of committed derived evidence.
 
-Before live evidence exists, the verifier returns `INCOMPLETE`. It never interprets absent model outputs as a successful artifact.
-
-## GitHub Actions
-
-`.github/workflows/ci.yml` runs the offline gates on Python 3.11 and 3.12.
-
-`.github/workflows/run-canonical.yml` performs the canonical live run. It commits partial append-only raw attempts back to the selected branch so reruns genuinely resume only missing scenarios. Once all 150 scenarios are valid, it generates and verifies the evidence bundle and commits the verified result.
+`probe-scent audit-release` adds repository-level checks for version consistency, required release files, exact dependency pins, manual-only canonical workflows, completed-evidence status, and stale pre-Ollama documentation.

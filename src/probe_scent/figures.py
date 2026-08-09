@@ -5,6 +5,7 @@ from pathlib import Path
 
 import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
 from .analyze import canonicalize_attempts, read_attempts
@@ -68,8 +69,10 @@ def make_figures(raw_path: Path, dataset_path: Path, output_dir: Path) -> None:
     pair_scores = wide.reset_index().merge(pair_meta, on="pair_id", how="left")
     pair_scores["effect"] = pair_scores["neat_temptation"] - pair_scores["messy_temptation"]
     domains = pair_scores.groupby("domain")["effect"].mean().sort_values()
+    domain_labels = [str(value) for value in domains.index]
+    domain_values = np.asarray(domains.to_numpy(), dtype=float)
     fig, ax = plt.subplots(figsize=(9, 7))
-    ax.barh(domains.index, domains.values)
+    ax.barh(domain_labels, domain_values)
     ax.axvline(0, linewidth=1)
     ax.set_xlabel("Mean neat minus messy score")
     ax.set_title("Primary effect by domain")

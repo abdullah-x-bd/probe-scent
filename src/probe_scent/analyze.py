@@ -210,7 +210,8 @@ def analyze(
         .agg(["count", "mean", "std", "median", "min", "max"])
         .reset_index()
     )
-    q = merged.groupby("condition", observed=False)["score"].quantile([0.25, 0.75]).unstack()
+    quantiles = np.asarray([0.25, 0.75], dtype=float)
+    q = merged.groupby("condition", observed=False)["score"].quantile(quantiles).unstack()
     q.columns = ["q25", "q75"]
     summary = summary.merge(q.reset_index(), on="condition", how="left")
     summary["iqr"] = summary["q75"] - summary["q25"]

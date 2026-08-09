@@ -10,6 +10,7 @@ from .artifact import build_manifest, verify_artifact
 from .config import load_config
 from .dataset import validate_dataset, write_receipt
 from .figures import make_figures
+from .release import audit_release
 
 
 def main() -> None:
@@ -31,6 +32,8 @@ def main() -> None:
     verify.add_argument("--result-dir", default="results/v1")
     verify.add_argument("--write-manifest", action="store_true")
     verify.add_argument("--no-regenerate", action="store_true")
+    audit = sub.add_parser("audit-release")
+    audit.add_argument("--root", default=".")
     args = parser.parse_args()
     if args.command == "validate-data":
         config = load_config(Path(args.config))
@@ -47,7 +50,9 @@ def main() -> None:
     if args.command == "run":
         raise SystemExit(subprocess.call([sys.executable, "-m", "probe_scent.run", *args.args]))
     if args.command == "analyze":
-        raise SystemExit(subprocess.call([sys.executable, "-m", "probe_scent.analyze", *args.args]))
+        raise SystemExit(
+            subprocess.call([sys.executable, "-m", "probe_scent.analyze", *args.args])
+        )
     if args.command == "make-figures":
         config = load_config(Path(args.config))
         make_figures(Path(args.raw), Path(config.canonical_dataset_path), Path(args.output_dir))
@@ -55,11 +60,20 @@ def main() -> None:
     if args.command == "verify-artifact":
         result_dir = Path(args.result_dir)
         if args.write_manifest:
-            print(json.dumps({"manifest_files": len(build_manifest(result_dir, result_dir / "MANIFEST.json"))}, indent=2))
+            manifest = build_manifest(result_dir, result_dir / "MANIFEST.json")
+            print(json.dumps({"manifest_files": len(manifest)}, indent=2))
             return
-        receipt = verify_artifact(Path(args.config), result_dir, regenerate=not args.no_regenerate)
+        receipt = verify_artifact(
+            Path(args.config), result_dir, regenerate=not args.no_regenerate
+        )
         print(json.dumps(receipt, indent=2, sort_keys=True))
         if receipt["status"] == "FAIL":
+            raise SystemExit(1)
+        return
+    if args.command == "audit-release":
+        receipt = audit_release(Path(args.root))
+        print(json.dumps(receipt, indent=2, sort_keys=True))
+        if receipt["status"] != "PASS":
             raise SystemExit(1)
         return
 

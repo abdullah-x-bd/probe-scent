@@ -95,18 +95,26 @@ The canonical backend is local and open, so the experiment requires no paid infe
 
 The canonical evidence was executed as five independent 30-cell shards using the identical frozen protocol, then recombined only after every shard passed its 30/30 completeness gate. The assembled 150-cell bundle then passed the same artifact verifier used for sequential execution.
 
-## Reproduce the artifact
+## Reproduce and audit the artifact
+
+For the closest reproduction of the validated release environment:
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+python -m pip install --upgrade pip
+python -m pip install -r requirements-lock.txt
+python -m pip install -e . --no-deps
+python -m pip check
+ruff check src tests scripts
+mypy src/probe_scent
 pytest -q
-probe-scent validate-data
+probe-scent validate-data --receipt /tmp/probe-scent-validation.json
+probe-scent audit-release
 python -m probe_scent.artifact --config configs/v1.yaml --result-dir results/v1
 ```
 
-The last command regenerates derived evidence from the committed raw results and checks completeness, provenance and manifest integrity.
+The release audit verifies version alignment, exact dependency pins, required archival files, raw-attempt schema validity, manual-only canonical workflows, completed-evidence status, and the absence of stale pre-Ollama instructions. The final artifact command regenerates derived evidence from committed raw results and checks completeness, provenance, manifest integrity, and byte-identical derived outputs.
 
 Canonical inference workflows remain available under `.github/workflows/` but are **manual-only** after the verified v1 evidence was frozen, preventing ordinary repository edits from accidentally rerunning the experiment.
 
@@ -129,11 +137,11 @@ The canonical analysis includes:
 ```text
 configs/                    frozen protocol configuration
 data/v1/                    base tasks, canonical dataset, run order, validation and pair audit
-docs/                       protocol, results, dataset card, pilot history, claims and limitations
-src/probe_scent/            backend, runner, schemas, analysis, figures and artifact verifier
+docs/                       protocol, results, dataset card, release checklist, claims and limitations
+src/probe_scent/            backend, runner, schemas, analysis, figures, release audit and verifier
 scripts/                     deterministic canonical-data generator
 results/v1/                 raw and derived canonical evidence, manifest and PASS receipt
-tests/                       scientific, provenance and pipeline tests
+tests/                       scientific, provenance, pipeline and release-contract tests
 .github/workflows/           offline CI and manual canonical inference workflows
 ```
 
@@ -146,6 +154,8 @@ tests/                       scientific, provenance and pipeline tests
 - [`docs/CLAIMS.md`](docs/CLAIMS.md) defines the allowed scientific claims after v1.
 - [`docs/LIMITATIONS.md`](docs/LIMITATIONS.md) records calibration and generalization limits.
 - [`docs/REPRODUCIBILITY.md`](docs/REPRODUCIBILITY.md) gives the exact reproduction workflow.
+- [`docs/RELEASE_CHECKLIST.md`](docs/RELEASE_CHECKLIST.md) records the archival release gate.
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) defines the canonical evidence-freeze policy for future work.
 
 ## Claim boundary
 
