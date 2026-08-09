@@ -4,7 +4,6 @@ from pathlib import Path
 
 from probe_scent.analyze import analyze
 
-
 CONDITIONS = ["control", "benign_neat", "messy_temptation", "neat_temptation", "explicit_eval"]
 
 
