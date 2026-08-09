@@ -7,8 +7,10 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from .artifact import verify_artifact
+from .schemas import AttemptRecord
 
 REQUIRED_RELEASE_FILES = (
     "README.md",
@@ -121,7 +123,8 @@ def _check_lock(root: Path, errors: list[str]) -> int:
         errors.append("requirements-lock.txt contains no pinned dependencies")
         return 0
     for line in lines:
-        if "==" not in line or any(operator in line for operator in (">=", "<=", "~=", ">", "<")):
+        operators = (">=", "<=", "~=", ">", "<")
+        if "==" not in line or any(operator in line for operator in operators):
             errors.append(f"dependency is not exactly pinned: {line}")
     return len(lines)
 
@@ -144,7 +147,11 @@ def _check_stale_documentation(root: Path, errors: list[str]) -> None:
         "docs/REPRODUCIBILITY.md",
         "results/v1/README.md",
     )
-    forbidden = ("OPENAI_API_KEY", "requires an OpenAI API key", "Until a canonical API run")
+    forbidden = (
+        "OPENAI_API_KEY",
+        "requires an OpenAI API key",
+        "Until a canonical API run",
+    )
     for relative in stale_targets:
         content = _text(root, relative)
         for phrase in forbidden:
@@ -158,6 +165,24 @@ def _check_stale_documentation(root: Path, errors: list[str]) -> None:
         errors.append("docs/RESULTS.md does not foreground the canonical ceiling effect")
 
 
+def _check_raw_attempt_schema(root: Path, errors: list[str]) -> int:
+    path = root / "results/v1/raw/attempts.jsonl"
+    count = 0
+    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+        if not line.strip():
+            continue
+        count += 1
+        try:
+            AttemptRecord.model_validate_json(line)
+        except ValidationError as exc:
+            errors.append(
+                f"invalid raw attempt schema at line {line_number}: {exc.errors(include_url=False)}"
+            )
+    if count < 150:
+        errors.append(f"raw attempt audit trail is unexpectedly short: {count} rows")
+    return count
+
+
 def audit_release(root: Path = Path(".")) -> dict[str, Any]:
     errors: list[str] = []
     _check_required_files(root, errors)
@@ -168,6 +193,7 @@ def audit_release(root: Path = Path(".")) -> dict[str, Any]:
     pinned_dependencies = _check_lock(root, errors)
     _check_workflows(root, errors)
     _check_stale_documentation(root, errors)
+    raw_attempt_rows = _check_raw_attempt_schema(root, errors)
 
     verification = _json(root, "results/v1/verification.json")
     if verification.get("status") != "PASS":
@@ -188,6 +214,7 @@ def audit_release(root: Path = Path(".")) -> dict[str, Any]:
         "errors": errors,
         "versions": versions,
         "pinned_dependencies": pinned_dependencies,
+        "raw_attempt_rows": raw_attempt_rows,
         "canonical_rows": verification.get("canonical_rows"),
         "artifact_status": artifact_receipt.get("status"),
         "workflows_manual_only": not any("workflow" in error for error in errors),
