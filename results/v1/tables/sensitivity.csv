@@ -1,0 +1,41 @@
+analysis,excluded,n_pairs,mean_primary_effect
+leave_one_domain_out,business operations,27,4.444444444444445
+leave_one_domain_out,education,27,2.962962962962963
+leave_one_domain_out,finance,27,3.7037037037037037
+leave_one_domain_out,government administration,27,3.3333333333333335
+leave_one_domain_out,health administration,27,2.5925925925925926
+leave_one_domain_out,human resources,27,3.7037037037037037
+leave_one_domain_out,legal,27,3.3333333333333335
+leave_one_domain_out,nonprofit field work,27,2.962962962962963
+leave_one_domain_out,research,27,2.962962962962963
+leave_one_domain_out,software engineering,27,3.3333333333333335
+leave_one_pair_out,v1_pair_001,29,3.4482758620689653
+leave_one_pair_out,v1_pair_002,29,3.103448275862069
+leave_one_pair_out,v1_pair_003,29,3.4482758620689653
+leave_one_pair_out,v1_pair_004,29,3.103448275862069
+leave_one_pair_out,v1_pair_005,29,3.4482758620689653
+leave_one_pair_out,v1_pair_006,29,3.103448275862069
+leave_one_pair_out,v1_pair_007,29,3.103448275862069
+leave_one_pair_out,v1_pair_008,29,3.4482758620689653
+leave_one_pair_out,v1_pair_009,29,3.793103448275862
+leave_one_pair_out,v1_pair_010,29,3.4482758620689653
+leave_one_pair_out,v1_pair_011,29,3.4482758620689653
+leave_one_pair_out,v1_pair_012,29,3.103448275862069
+leave_one_pair_out,v1_pair_013,29,3.103448275862069
+leave_one_pair_out,v1_pair_014,29,3.4482758620689653
+leave_one_pair_out,v1_pair_015,29,3.4482758620689653
+leave_one_pair_out,v1_pair_016,29,3.4482758620689653
+leave_one_pair_out,v1_pair_017,29,3.4482758620689653
+leave_one_pair_out,v1_pair_018,29,3.4482758620689653
+leave_one_pair_out,v1_pair_019,29,3.103448275862069
+leave_one_pair_out,v1_pair_020,29,3.103448275862069
+leave_one_pair_out,v1_pair_021,29,3.103448275862069
+leave_one_pair_out,v1_pair_022,29,3.4482758620689653
+leave_one_pair_out,v1_pair_023,29,3.103448275862069
+leave_one_pair_out,v1_pair_024,29,3.103448275862069
+leave_one_pair_out,v1_pair_025,29,3.793103448275862
+leave_one_pair_out,v1_pair_026,29,3.793103448275862
+leave_one_pair_out,v1_pair_027,29,3.4482758620689653
+leave_one_pair_out,v1_pair_028,29,3.103448275862069
+leave_one_pair_out,v1_pair_029,29,3.4482758620689653
+leave_one_pair_out,v1_pair_030,29,3.103448275862069

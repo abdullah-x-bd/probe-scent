@@ -1,0 +1,15 @@
+{
+  "base_tasks": 30,
+  "complete_pairs": 30,
+  "dataset_sha256": "077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a",
+  "duplicate_ids": 0,
+  "errors": [],
+  "forbidden_explicit_eval_terms_in_nonexplicit_conditions": 0,
+  "max_messy_neat_word_count_difference": 3,
+  "max_messy_neat_word_count_ratio": 1.065217391304348,
+  "missing_cells": 0,
+  "protocol_version": "v1.0.0",
+  "rows": 150,
+  "run_order_seed": 20260809,
+  "status": "PASS"
+}

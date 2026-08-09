@@ -1,209 +1,285 @@
+from __future__ import annotations
+
 import argparse
 import json
-import os
+import random
+import time
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Dict, Iterable, Optional
+from typing import Any
 
-from dotenv import load_dotenv
-from openai import OpenAI
+from pydantic import ValidationError
 
-from .prompts import (
-    AGENT_SYSTEM_PROMPT,
-    AGENT_USER_TEMPLATE,
-    JUDGE_SYSTEM_PROMPT,
-    JUDGE_USER_TEMPLATE,
-    TRANSCRIPT_JUDGE_TEMPLATE,
-)
-
-DEFAULT_MODEL = os.getenv("PROBE_SCENT_MODEL", "gpt-5.4-nano")
+from .backends import BackendIdentity, OllamaBackend
+from .config import load_config
+from .dataset import file_sha256, read_scenarios
+from .prompts import JUDGE_SYSTEM_PROMPT, JUDGE_USER_TEMPLATE, prompt_sha256
+from .schemas import JudgeOutput, Scenario
 
 
-def read_jsonl(path: Path) -> Iterable[Dict[str, Any]]:
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                yield json.loads(line)
-
-
-def append_jsonl(path: Path, row: Dict[str, Any]) -> None:
+def append_jsonl(path: Path, row: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        f.flush()
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(row, ensure_ascii=False, sort_keys=True) + "\n")
+        handle.flush()
 
 
-def parse_json_object(text: str) -> Dict[str, Any]:
+def parse_json_object(text: str) -> JudgeOutput:
+    candidate = text.strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        start = text.find("{")
-        end = text.rfind("}")
-        if start != -1 and end != -1 and end > start:
-            return json.loads(text[start : end + 1])
-        return {"parse_error": text}
+        return JudgeOutput.model_validate_json(candidate)
+    except ValidationError:
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return JudgeOutput.model_validate_json(candidate[start : end + 1])
 
 
-def call_model(
-    client: OpenAI,
-    model: str,
-    system_prompt: str,
-    user_prompt: str,
-    max_output_tokens: int,
-) -> str:
-    response = client.responses.create(
-        model=model,
-        input=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        max_output_tokens=max_output_tokens,
+def load_latest_attempts(path: Path) -> dict[str, dict[str, Any]]:
+    latest: dict[str, dict[str, Any]] = {}
+    if not path.exists():
+        return latest
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        scenario_id = str(row["scenario_id"])
+        latest[scenario_id] = row
+    return latest
+
+
+def transient_error(exc: Exception) -> bool:
+    text = repr(exc).lower()
+    markers = (
+        "timeout",
+        "temporarily",
+        "connection",
+        "rate limit",
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
     )
-    return response.output_text
+    return any(marker in text for marker in markers)
 
 
-def judge_scenario(
-    client: OpenAI,
-    model: str,
-    scenario: Dict[str, Any],
-    max_output_tokens: int,
-) -> Dict[str, Any]:
-    prompt = JUDGE_USER_TEMPLATE.format(scenario_text=scenario["text"])
-    raw = call_model(client, model, JUDGE_SYSTEM_PROMPT, prompt, max_output_tokens)
-    parsed = parse_json_object(raw)
-    return {
-        **scenario,
-        "mode": "judge",
-        "judge_model": model,
-        "raw_judge_output": raw,
-        "score": parsed.get("score"),
-        "label": parsed.get("label") or parsed.get("seems_to_test"),
-        "reason": parsed.get("reason"),
-        "confidence": parsed.get("confidence"),
-        "parse_error": parsed.get("parse_error"),
-        "run_error": None,
+def _backend_identity(config: Any) -> tuple[OllamaBackend, BackendIdentity]:
+    if config.judge_backend != "ollama":
+        raise RuntimeError(f"Unsupported frozen judge backend: {config.judge_backend}")
+    backend = OllamaBackend()
+    identity = backend.identity(config.judge_model, config.judge_model_digest_prefix)
+    return backend, identity
+
+
+def run_one(
+    backend: OllamaBackend,
+    scenario: Scenario,
+    config: Any,
+) -> tuple[JudgeOutput, dict[str, Any]]:
+    user_prompt = JUDGE_USER_TEMPLATE.format(scenario_text=scenario.text)
+    response = backend.judge(
+        scenario=scenario,
+        model=config.judge_model,
+        system_prompt=JUDGE_SYSTEM_PROMPT,
+        user_prompt=user_prompt,
+        max_output_tokens=config.max_output_tokens,
+        temperature=config.temperature,
+        seed=config.inference_seed,
+        context_length=config.context_length,
+        think=config.think,
+    )
+    parsed = parse_json_object(response.content)
+    meta: dict[str, Any] = {
+        "response_model": response.model,
+        "response_created_at": response.created_at,
+        "raw_output": response.content,
+        "total_duration_ns": response.total_duration_ns,
+        "prompt_eval_count": response.prompt_eval_count,
+        "eval_count": response.eval_count,
     }
-
-
-def agent_then_judge(
-    client: OpenAI,
-    model: str,
-    scenario: Dict[str, Any],
-    max_output_tokens: int,
-    agent_output_tokens: int,
-) -> Dict[str, Any]:
-    agent_prompt = AGENT_USER_TEMPLATE.format(scenario_text=scenario["text"])
-    assistant_response = call_model(
-        client,
-        model,
-        AGENT_SYSTEM_PROMPT,
-        agent_prompt,
-        agent_output_tokens,
-    )
-
-    judge_prompt = TRANSCRIPT_JUDGE_TEMPLATE.format(
-        scenario_text=scenario["text"],
-        assistant_response=assistant_response,
-    )
-    raw = call_model(client, model, JUDGE_SYSTEM_PROMPT, judge_prompt, max_output_tokens)
-    parsed = parse_json_object(raw)
-    return {
-        **scenario,
-        "mode": "agent",
-        "agent_model": model,
-        "judge_model": model,
-        "assistant_response": assistant_response,
-        "raw_judge_output": raw,
-        "score": parsed.get("score"),
-        "label": parsed.get("label") or parsed.get("seems_to_test"),
-        "reason": parsed.get("reason"),
-        "confidence": parsed.get("confidence"),
-        "parse_error": parsed.get("parse_error"),
-        "run_error": None,
-    }
-
-
-def is_credit_or_auth_error(message: str) -> bool:
-    msg = message.lower()
-    return any(
-        phrase in msg
-        for phrase in [
-            "insufficient_quota",
-            "billing",
-            "quota",
-            "credit",
-            "api key",
-            "authentication",
-            "401",
-            "429",
-        ]
-    )
+    return parsed, meta
 
 
 def main() -> None:
-    load_dotenv()
-
-    parser = argparse.ArgumentParser(description="Run the probe-scent experiment.")
-    parser.add_argument("--mode", choices=["judge", "agent"], required=True)
-    parser.add_argument("--input", required=True, help="Path to scenarios JSONL")
-    parser.add_argument("--output", required=True, help="Path to output JSONL")
-    parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--max-output-tokens", type=int, default=80)
-    parser.add_argument("--agent-output-tokens", type=int, default=300)
-    parser.add_argument("--offset", type=int, default=0)
+    parser = argparse.ArgumentParser(description="Run the frozen Probe Scent v1 judge protocol.")
+    parser.add_argument("--config", default="configs/v1.yaml")
+    parser.add_argument("--output", default="results/v1/raw/attempts.jsonl")
+    parser.add_argument("--resume", action="store_true")
+    parser.add_argument("--overwrite", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     parser.add_argument("--limit", type=int, default=None)
-    parser.add_argument("--strict", action="store_true")
+    parser.add_argument("--offset", type=int, default=0)
     args = parser.parse_args()
 
-    client = OpenAI()
-    scenarios = list(read_jsonl(Path(args.input)))
+    config = load_config(Path(args.config))
+    input_path = Path(config.dataset_path)
+    actual_run_sha = file_sha256(input_path)
+    if actual_run_sha != config.run_order_sha256:
+        raise SystemExit(
+            f"Run-order hash mismatch. Expected {config.run_order_sha256}, got {actual_run_sha}."
+        )
+
+    scenarios = read_scenarios(input_path)
     scenarios = scenarios[args.offset :]
     if args.limit is not None:
         scenarios = scenarios[: args.limit]
 
     output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text("", encoding="utf-8")
+    if output_path.exists() and not args.resume and not args.overwrite:
+        raise SystemExit(
+            f"{output_path} already exists. Use --resume to continue or --overwrite to restart."
+        )
+    if args.overwrite:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("", encoding="utf-8")
 
-    completed = 0
-    errors = 0
+    latest = load_latest_attempts(output_path) if args.resume else {}
+    completed = {
+        scenario_id
+        for scenario_id, row in latest.items()
+        if row.get("status") == "ok" and isinstance(row.get("score"), int)
+    }
+
+    if args.dry_run:
+        pending = [scenario.id for scenario in scenarios if scenario.id not in completed]
+        print(
+            json.dumps(
+                {
+                    "protocol_version": config.version,
+                    "dataset_sha256": config.dataset_sha256,
+                    "run_order_sha256": actual_run_sha,
+                    "backend": config.judge_backend,
+                    "model": config.judge_model,
+                    "model_digest_prefix": config.judge_model_digest_prefix,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
+                    "selected_rows": len(scenarios),
+                    "already_completed": len(completed),
+                    "pending": len(pending),
+                    "pending_ids": pending[:20],
+                },
+                indent=2,
+            )
+        )
+        return
+
+    backend, identity = _backend_identity(config)
+    run_id = f"{config.version}-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}"
+    p_hash = prompt_sha256()
 
     for scenario in scenarios:
-        try:
-            if args.mode == "judge":
-                row = judge_scenario(client, args.model, scenario, args.max_output_tokens)
-            else:
-                row = agent_then_judge(
-                    client,
-                    args.model,
-                    scenario,
-                    args.max_output_tokens,
-                    args.agent_output_tokens,
-                )
-            completed += 1
-            print(f"{scenario['id']} score={row.get('score')}")
-            append_jsonl(output_path, row)
-        except Exception as exc:
-            errors += 1
-            error_text = repr(exc)
-            row = {
-                **scenario,
-                "mode": args.mode,
-                "judge_model": args.model,
-                "score": None,
-                "label": None,
-                "reason": None,
-                "confidence": None,
-                "parse_error": None,
-                "run_error": error_text,
-            }
-            append_jsonl(output_path, row)
-            print(f"{scenario['id']} ERROR={error_text}")
+        if scenario.id in completed:
+            continue
+        previous = latest.get(scenario.id)
+        attempt_no = int(previous.get("attempt_no", 0)) + 1 if previous else 1
 
-            if args.strict or is_credit_or_auth_error(error_text):
+        last_error: str | None = None
+        for retry_index in range(config.retry.max_attempts):
+            started = datetime.now(UTC).isoformat()
+            try:
+                parsed, response_meta = run_one(backend, scenario, config)
+                row: dict[str, Any] = {
+                    "scenario_id": scenario.id,
+                    "pair_id": scenario.pair_id,
+                    "base_task_id": scenario.base_task_id,
+                    "domain": scenario.domain,
+                    "condition": scenario.condition,
+                    "attempt_no": attempt_no,
+                    "retry_index": retry_index,
+                    "status": "ok",
+                    "score": parsed.score,
+                    "label": parsed.label,
+                    "primary_cue": parsed.primary_cue,
+                    "confidence": parsed.confidence,
+                    "judge_backend": identity.backend,
+                    "backend_version": identity.backend_version,
+                    "requested_model": identity.model,
+                    "response_model": response_meta["response_model"],
+                    "model_digest": identity.model_digest,
+                    "model_size_bytes": identity.model_size_bytes,
+                    "response_created_at": response_meta["response_created_at"],
+                    "total_duration_ns": response_meta["total_duration_ns"],
+                    "prompt_eval_count": response_meta["prompt_eval_count"],
+                    "eval_count": response_meta["eval_count"],
+                    "raw_output": response_meta["raw_output"],
+                    "prompt_sha256": p_hash,
+                    "dataset_sha256": config.dataset_sha256,
+                    "run_order_sha256": actual_run_sha,
+                    "protocol_version": config.version,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
+                    "run_id": run_id,
+                    "started_at_utc": started,
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
+                    "run_error": None,
+                }
+                append_jsonl(output_path, row)
+                latest[scenario.id] = row
+                print(f"{scenario.id} score={parsed.score}")
                 break
+            except Exception as exc:  # noqa: BLE001
+                last_error = repr(exc)
+                row = {
+                    "scenario_id": scenario.id,
+                    "pair_id": scenario.pair_id,
+                    "base_task_id": scenario.base_task_id,
+                    "domain": scenario.domain,
+                    "condition": scenario.condition,
+                    "attempt_no": attempt_no,
+                    "retry_index": retry_index,
+                    "status": "error",
+                    "score": None,
+                    "label": None,
+                    "primary_cue": None,
+                    "confidence": None,
+                    "judge_backend": identity.backend,
+                    "backend_version": identity.backend_version,
+                    "requested_model": identity.model,
+                    "response_model": None,
+                    "model_digest": identity.model_digest,
+                    "model_size_bytes": identity.model_size_bytes,
+                    "response_created_at": None,
+                    "total_duration_ns": None,
+                    "prompt_eval_count": None,
+                    "eval_count": None,
+                    "raw_output": None,
+                    "prompt_sha256": p_hash,
+                    "dataset_sha256": config.dataset_sha256,
+                    "run_order_sha256": actual_run_sha,
+                    "protocol_version": config.version,
+                    "temperature": config.temperature,
+                    "inference_seed": config.inference_seed,
+                    "context_length": config.context_length,
+                    "think": config.think,
+                    "run_id": run_id,
+                    "started_at_utc": started,
+                    "finished_at_utc": datetime.now(UTC).isoformat(),
+                    "run_error": last_error,
+                }
+                append_jsonl(output_path, row)
+                latest[scenario.id] = row
+                print(f"{scenario.id} ERROR {last_error}")
+                if not transient_error(exc) or retry_index + 1 >= config.retry.max_attempts:
+                    break
+                delay = config.retry.base_delay_seconds * (2**retry_index)
+                delay *= 0.9 + 0.2 * random.random()
+                time.sleep(delay)
 
-    print(f"completed={completed} errors={errors} output={output_path}")
+        if latest.get(scenario.id, {}).get("status") != "ok":
+            print(f"{scenario.id} remains incomplete after retries: {last_error}")
+
+    valid = sum(
+        1
+        for row in load_latest_attempts(output_path).values()
+        if row.get("status") == "ok" and isinstance(row.get("score"), int)
+    )
+    print(f"valid_latest_results={valid}/{len(read_scenarios(input_path))}")
 
 
 if __name__ == "__main__":

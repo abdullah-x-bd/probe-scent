@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "probe-scent"
+version = "1.0.0"
+description = "Controlled benchmark for measuring evaluation detectability from opportunity structure in language-model scenarios."
+readme = "README.md"
+requires-python = ">=3.11"
+license = {text = "Apache-2.0"}
+authors = [{name = "Abdullah X"}]
+dependencies = [
+  "pandas>=2.2.2",
+  "numpy>=1.26.4",
+  "scipy>=1.13.1",
+  "matplotlib>=3.9.0",
+  "pydantic>=2.8.2",
+  "PyYAML>=6.0.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.3.2",
+  "ruff>=0.6.2",
+  "mypy>=1.11.1",
+]
+
+[project.scripts]
+probe-scent = "probe_scent.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+ignore = ["RUF046"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+warn_unused_ignores = true
