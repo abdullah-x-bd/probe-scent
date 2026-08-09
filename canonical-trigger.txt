@@ -1,0 +1,7 @@
+Probe Scent v1 canonical inference trigger
+protocol: v1.0.0
+backend: ollama
+model: qwen3.5:4b-q4_K_M
+dataset_sha256: 077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a
+run_order_sha256: aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7
+triggered_at: 2026-08-09
