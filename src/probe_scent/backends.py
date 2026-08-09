@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -51,7 +51,12 @@ class OllamaBackend:
         )
         try:
             with urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
+                parsed: Any = json.loads(response.read().decode("utf-8"))
+                if not isinstance(parsed, dict):
+                    raise TypeError(f"Ollama returned non-object JSON for {path}")
+                if not all(isinstance(key, str) for key in parsed):
+                    raise TypeError(f"Ollama returned non-string object keys for {path}")
+                return cast(dict[str, Any], parsed)
         except (HTTPError, URLError, TimeoutError) as exc:
             raise RuntimeError(f"Ollama request failed for {path}: {exc}") from exc
 
