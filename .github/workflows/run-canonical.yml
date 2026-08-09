@@ -8,6 +8,9 @@ on:
         required: false
         default: ""
 
+permissions:
+  contents: write
+
 jobs:
   canonical:
     runs-on: ubuntu-latest
@@ -15,6 +18,9 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -28,6 +34,7 @@ jobs:
           pytest -q
           probe-scent validate-data --receipt data/v1/validation.json
       - name: Run frozen canonical protocol
+        id: canonical_run
         shell: bash
         run: |
           mkdir -p results/v1/raw
@@ -35,7 +42,58 @@ jobs:
           if [[ -n "${{ inputs.model }}" ]]; then
             MODEL_ARGS+=(--model "${{ inputs.model }}")
           fi
-          python -m probe_scent.run --config configs/v1.yaml --output results/v1/raw/attempts.jsonl --resume "${MODEL_ARGS[@]}"
+          RESUME_ARGS=()
+          if [[ -f results/v1/raw/attempts.jsonl ]]; then
+            RESUME_ARGS+=(--resume)
+          fi
+          python -m probe_scent.run \
+            --config configs/v1.yaml \
+            --output results/v1/raw/attempts.jsonl \
+            "${RESUME_ARGS[@]}" \
+            "${MODEL_ARGS[@]}"
+      - name: Persist append-only raw attempts
+        if: always()
+        shell: bash
+        run: |
+          if [[ ! -f results/v1/raw/attempts.jsonl ]]; then
+            echo "No raw attempts file exists; nothing to persist."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/v1/raw/attempts.jsonl data/v1/validation.json
+          if git diff --cached --quiet; then
+            echo "No new raw attempts to persist."
+          else
+            git commit -m "Record Probe Scent v1 canonical raw attempts [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
+      - name: Require all 150 canonical results before analysis
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from probe_scent.config import load_config
+          from probe_scent.dataset import read_scenarios
+          from probe_scent.run import load_latest_attempts
+
+          config = load_config(Path("configs/v1.yaml"))
+          scenarios = read_scenarios(Path(config.dataset_path))
+          latest = load_latest_attempts(Path("results/v1/raw/attempts.jsonl"))
+          valid = {
+              scenario_id
+              for scenario_id, row in latest.items()
+              if row.get("status") == "ok" and isinstance(row.get("score"), int)
+          }
+          expected = {scenario.id for scenario in scenarios}
+          missing = sorted(expected - valid)
+          print(f"valid={len(valid)}/{len(expected)} missing={len(missing)}")
+          if missing:
+              print("Missing IDs:", ", ".join(missing))
+              raise SystemExit(
+                  "Canonical evidence is incomplete. Re-run this workflow; resume mode will execute only missing IDs."
+              )
+          PY
       - name: Analyze
         run: python -m probe_scent.analyze --config configs/v1.yaml --raw results/v1/raw/attempts.jsonl --output-dir results/v1
       - name: Figures
@@ -44,6 +102,18 @@ jobs:
         run: python -m probe_scent.artifact --result-dir results/v1 --write-manifest
       - name: Verify canonical artifact
         run: python -m probe_scent.artifact --config configs/v1.yaml --result-dir results/v1
+      - name: Commit verified evidence bundle
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add results/v1 data/v1/validation.json
+          if git diff --cached --quiet; then
+            echo "Verified evidence already committed."
+          else
+            git commit -m "Record verified Probe Scent v1 evidence [skip ci]"
+            git push origin "HEAD:${{ github.ref_name }}"
+          fi
       - name: Upload evidence bundle
         if: always()
         uses: actions/upload-artifact@v4
