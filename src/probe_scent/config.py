@@ -29,9 +29,15 @@ class ProtocolConfig:
     dataset_sha256: str
     run_order_sha256: str
     run_order_seed: int
+    judge_backend: str
     judge_model: str
+    judge_model_digest_prefix: str
     judge_prompt_version: str
     max_output_tokens: int
+    temperature: float
+    inference_seed: int
+    context_length: int
+    think: bool
     retry: RetryConfig
     analysis: AnalysisConfig
     primary_contrast: str
@@ -47,9 +53,15 @@ def load_config(path: Path) -> ProtocolConfig:
         dataset_sha256=str(raw["dataset_sha256"]),
         run_order_sha256=str(raw["run_order_sha256"]),
         run_order_seed=int(raw["run_order_seed"]),
+        judge_backend=str(raw["judge_backend"]),
         judge_model=str(raw["judge_model"]),
+        judge_model_digest_prefix=str(raw["judge_model_digest_prefix"]),
         judge_prompt_version=str(raw["judge_prompt_version"]),
         max_output_tokens=int(raw["max_output_tokens"]),
+        temperature=float(raw["temperature"]),
+        inference_seed=int(raw["inference_seed"]),
+        context_length=int(raw["context_length"]),
+        think=bool(raw["think"]),
         retry=RetryConfig(**raw["retry"]),
         analysis=AnalysisConfig(**raw["analysis"]),
         primary_contrast=str(raw["primary_contrast"]),
