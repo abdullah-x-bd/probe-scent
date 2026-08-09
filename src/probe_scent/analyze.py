@@ -19,6 +19,8 @@ def json_safe(value: Any) -> Any:
         return [json_safe(item) for item in value]
     if isinstance(value, tuple):
         return [json_safe(item) for item in value]
+    if isinstance(value, np.generic):
+        return value.item()
     if isinstance(value, float) and not np.isfinite(value):
         return None
     return value
@@ -131,7 +133,7 @@ def analyze(
 ) -> dict[str, Any]:
     attempts = read_attempts(raw_path)
     canonical = canonicalize_attempts(attempts)
-    dataset = pd.DataFrame([s.model_dump() for s in read_scenarios(dataset_path)])
+    dataset = pd.DataFrame([scenario.model_dump() for scenario in read_scenarios(dataset_path)])
     provenance_columns = [
         "scenario_id",
         "score",
@@ -159,6 +161,40 @@ def analyze(
     missing_provenance = [column for column in provenance_columns if column not in canonical.columns]
     if missing_provenance:
         raise ValueError(f"Raw results missing provenance columns: {missing_provenance}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    tables = output_dir / "tables"
+    tables.mkdir(parents=True, exist_ok=True)
+    canonical.to_json(output_dir / "canonical_results.jsonl", orient="records", lines=True)
+
+    identity_fields = [
+        "judge_backend",
+        "backend_version",
+        "requested_model",
+        "response_model",
+        "model_digest",
+        "model_size_bytes",
+        "prompt_sha256",
+        "dataset_sha256",
+        "run_order_sha256",
+        "protocol_version",
+        "temperature",
+        "inference_seed",
+        "context_length",
+        "think",
+    ]
+    if canonical.empty:
+        raise ValueError("No canonical results are available for analysis.")
+    identity: dict[str, Any] = {}
+    for field in identity_fields:
+        values = canonical[field].dropna()
+        identity[field] = json_safe(values.iloc[0]) if not values.empty else None
+        identity[f"{field}_unique_values"] = int(values.nunique())
+    (output_dir / "model_identity.json").write_text(
+        json.dumps(json_safe(identity), indent=2, sort_keys=True, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+
     merged = dataset.merge(
         canonical[provenance_columns],
         left_on="id",
@@ -168,10 +204,6 @@ def analyze(
     )
     merged["score"] = pd.to_numeric(merged["score"], errors="coerce")
     complete_rows = int(merged["score"].notna().sum())
-    output_dir.mkdir(parents=True, exist_ok=True)
-    tables = output_dir / "tables"
-    tables.mkdir(parents=True, exist_ok=True)
-    canonical.to_json(output_dir / "canonical_results.jsonl", orient="records", lines=True)
 
     summary = (
         merged.groupby("condition", observed=False)["score"]
