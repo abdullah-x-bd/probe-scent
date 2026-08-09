@@ -46,43 +46,73 @@ def build_manifest(result_dir: Path, output: Path) -> dict[str, str]:
     return files
 
 
+def _require_column_value(
+    canonical: Any,
+    column: str,
+    expected: str,
+    errors: list[str],
+) -> None:
+    if column not in canonical.columns:
+        errors.append(f"raw results missing required provenance column: {column}")
+        return
+    values = canonical[column].dropna().astype(str)
+    if len(values) != len(canonical):
+        errors.append(f"raw results contain missing provenance values: {column}")
+        return
+    if bool((values != expected).any()):
+        errors.append(f"raw results contain wrong {column}; expected {expected}")
+
+
 def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True) -> dict[str, Any]:
     config = load_config(config_path)
     errors: list[str] = []
+    canonical_dataset = Path(config.canonical_dataset_path)
     dataset_receipt = validate_dataset(
-        Path(config.canonical_dataset_path), expected_sha256=config.dataset_sha256
+        canonical_dataset, expected_sha256=config.dataset_sha256
     )
     if dataset_receipt["status"] != "PASS":
         errors.append("dataset validation failed")
+
+    pair_audit_path = canonical_dataset.with_name("pair_audit.json")
+    if not pair_audit_path.exists():
+        errors.append("manual pair-audit receipt missing")
+    else:
+        pair_audit = json.loads(pair_audit_path.read_text(encoding="utf-8"))
+        if pair_audit.get("status") != "PASS" or pair_audit.get("pairs_reviewed") != 30:
+            errors.append("manual pair-audit receipt is not a 30-pair PASS")
+
     run_order = Path(config.dataset_path)
     if file_sha256(run_order) != config.run_order_sha256:
         errors.append("run-order hash mismatch")
+
     raw = result_dir / "raw/attempts.jsonl"
     if not raw.exists():
         return {
             "status": "INCOMPLETE",
             "errors": ["canonical raw attempts are not present"],
             "dataset": dataset_receipt,
+            "pair_audit": str(pair_audit_path),
         }
+
     canonical = canonicalize_attempts(read_attempts(raw))
-    expected_ids = {s.id for s in read_scenarios(Path(config.canonical_dataset_path))}
+    expected_ids = {s.id for s in read_scenarios(canonical_dataset)}
     actual_ids = set(canonical["scenario_id"].astype(str))
     if actual_ids != expected_ids:
         errors.append(
             f"canonical result ids mismatch: missing={len(expected_ids-actual_ids)} "
             f"extra={len(actual_ids-expected_ids)}"
         )
-    if "dataset_sha256" in canonical.columns:
-        bad = canonical["dataset_sha256"].dropna().astype(str) != config.dataset_sha256
-        if bool(bad.any()):
-            errors.append("raw results contain wrong dataset hash")
-    if "prompt_sha256" in canonical.columns:
-        bad = canonical["prompt_sha256"].dropna().astype(str) != prompt_sha256()
-        if bool(bad.any()):
-            errors.append("raw results contain wrong prompt hash")
+
+    _require_column_value(canonical, "dataset_sha256", config.dataset_sha256, errors)
+    _require_column_value(canonical, "run_order_sha256", config.run_order_sha256, errors)
+    _require_column_value(canonical, "prompt_sha256", prompt_sha256(), errors)
+    _require_column_value(canonical, "protocol_version", config.version, errors)
+    _require_column_value(canonical, "requested_model", config.judge_model, errors)
+
     missing = [rel for rel in REQUIRED_DERIVED if not (result_dir / rel).exists()]
     if missing:
         errors.append(f"missing derived evidence: {missing}")
+
     manifest_path = result_dir / "MANIFEST.json"
     if not manifest_path.exists():
         errors.append("MANIFEST.json missing")
@@ -94,6 +124,7 @@ def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True
                 errors.append(f"manifest file missing: {rel}")
             elif sha256(path) != expected_hash:
                 errors.append(f"manifest hash mismatch: {rel}")
+
     if regenerate and not missing:
         with tempfile.TemporaryDirectory(prefix="probe-scent-verify-") as tmp:
             temp_result = Path(tmp) / "v1"
@@ -101,7 +132,7 @@ def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True
             (temp_result / "raw/attempts.jsonl").write_bytes(raw.read_bytes())
             analyze(
                 raw_path=temp_result / "raw/attempts.jsonl",
-                dataset_path=Path(config.canonical_dataset_path),
+                dataset_path=canonical_dataset,
                 output_dir=temp_result,
                 bootstrap_samples=config.analysis.bootstrap_samples,
                 bootstrap_seed=config.analysis.bootstrap_seed,
@@ -110,18 +141,22 @@ def verify_artifact(config_path: Path, result_dir: Path, regenerate: bool = True
             )
             make_figures(
                 temp_result / "raw/attempts.jsonl",
-                Path(config.canonical_dataset_path),
+                canonical_dataset,
                 temp_result / "figures",
             )
             for rel in REQUIRED_DERIVED:
                 if sha256(temp_result / rel) != sha256(result_dir / rel):
                     errors.append(f"regeneration mismatch: {rel}")
+
     return {
         "status": "PASS" if not errors else "FAIL",
         "errors": errors,
         "dataset": dataset_receipt,
+        "pair_audit": str(pair_audit_path),
         "canonical_rows": int(len(canonical)),
         "expected_rows": int(len(expected_ids)),
+        "canonical_model": config.judge_model,
+        "protocol_version": config.version,
     }
 
 
