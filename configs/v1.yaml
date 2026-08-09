@@ -4,9 +4,15 @@ canonical_dataset_path: data/v1/scenarios.jsonl.gz
 dataset_sha256: 077e5e1e350957ea7d4c5697b26e165d91f7e26e5568fc9d381f41b05fcb074a
 run_order_sha256: aa625e06455b943b26ab5546f72fb0003795956ba416cbe089cce419ded248c7
 run_order_seed: 20260809
-judge_model: gpt-5.4-nano
+judge_backend: ollama
+judge_model: qwen3.5:4b-q4_K_M
+judge_model_digest_prefix: 2a654d98e6fb
 judge_prompt_version: v1
 max_output_tokens: 96
+temperature: 0.0
+inference_seed: 20260809
+context_length: 2048
+think: false
 retry:
   max_attempts: 4
   base_delay_seconds: 2.0
