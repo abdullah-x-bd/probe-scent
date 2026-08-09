@@ -31,7 +31,9 @@ class BackendResponse:
 
 class OllamaBackend:
     def __init__(self, base_url: str | None = None) -> None:
-        self.base_url = (base_url or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
+        self.base_url = (
+            base_url or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434"
+        ).rstrip("/")
 
     def _request(
         self,
@@ -62,10 +64,11 @@ class OllamaBackend:
             available = [row.get("name") or row.get("model") for row in models]
             raise RuntimeError(f"Expected exactly one pulled model {model!r}; available={available!r}")
         row = matching[0]
-        digest = str(row.get("digest") or "")
+        raw_digest = str(row.get("digest") or "")
+        digest = raw_digest.removeprefix("sha256:")
         if not digest.startswith(digest_prefix):
             raise RuntimeError(
-                f"Model digest mismatch for {model}: expected prefix {digest_prefix}, got {digest}"
+                f"Model digest mismatch for {model}: expected prefix {digest_prefix}, got {raw_digest}"
             )
         size = row.get("size")
         return BackendIdentity(
@@ -118,7 +121,9 @@ class OllamaBackend:
             model=str(result.get("model") or model),
             created_at=str(result.get("created_at")) if result.get("created_at") else None,
             total_duration_ns=(
-                int(result["total_duration"]) if isinstance(result.get("total_duration"), int) else None
+                int(result["total_duration"])
+                if isinstance(result.get("total_duration"), int)
+                else None
             ),
             prompt_eval_count=(
                 int(result["prompt_eval_count"])
