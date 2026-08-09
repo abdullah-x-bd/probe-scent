@@ -2,11 +2,6 @@ name: Run canonical Probe Scent v1
 
 on:
   workflow_dispatch:
-    inputs:
-      model:
-        description: Canonical judge model override. Leave blank to use configs/v1.yaml.
-        required: false
-        default: ""
 
 permissions:
   contents: write
@@ -34,14 +29,9 @@ jobs:
           pytest -q
           probe-scent validate-data --receipt data/v1/validation.json
       - name: Run frozen canonical protocol
-        id: canonical_run
         shell: bash
         run: |
           mkdir -p results/v1/raw
-          MODEL_ARGS=()
-          if [[ -n "${{ inputs.model }}" ]]; then
-            MODEL_ARGS+=(--model "${{ inputs.model }}")
-          fi
           RESUME_ARGS=()
           if [[ -f results/v1/raw/attempts.jsonl ]]; then
             RESUME_ARGS+=(--resume)
@@ -49,8 +39,7 @@ jobs:
           python -m probe_scent.run \
             --config configs/v1.yaml \
             --output results/v1/raw/attempts.jsonl \
-            "${RESUME_ARGS[@]}" \
-            "${MODEL_ARGS[@]}"
+            "${RESUME_ARGS[@]}"
       - name: Persist append-only raw attempts
         if: always()
         shell: bash
