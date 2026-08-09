@@ -109,7 +109,7 @@ def paired_effect(
     sd = float(np.std(diffs, ddof=1)) if len(diffs) > 1 else float("nan")
     dz = float(np.mean(diffs) / sd) if sd and np.isfinite(sd) else float("nan")
     return {
-        "n_pairs": int(len(diffs)),
+        "n_pairs": len(diffs),
         "mean_difference": float(np.mean(diffs)) if len(diffs) else float("nan"),
         "median_difference": float(np.median(diffs)) if len(diffs) else float("nan"),
         "std_difference": sd,
@@ -173,7 +173,7 @@ def analyze(
     ).to_numpy(dtype=float)
     int_low, int_high = bootstrap_ci(interaction_values, bootstrap_samples, bootstrap_seed + 99)
     effects["interaction"] = {
-        "n_pairs": int(len(interaction_values)),
+        "n_pairs": len(interaction_values),
         "mean_difference_in_differences": float(np.mean(interaction_values))
         if len(interaction_values) else float("nan"),
         "median_difference_in_differences": float(np.median(interaction_values))
@@ -237,7 +237,7 @@ def analyze(
         },
     }
     result: dict[str, Any] = {
-        "rows_expected": int(len(dataset)),
+        "rows_expected": len(dataset),
         "rows_complete": complete_rows,
         "pairs_expected": int(dataset["pair_id"].nunique()),
         "pairs_with_primary_contrast": int(
