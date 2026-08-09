@@ -1,7 +1,6 @@
+import csv
 import json
 from pathlib import Path
-
-import pandas as pd
 
 from probe_scent.analyze import analyze
 
@@ -51,4 +50,5 @@ def test_analysis_recovers_known_paired_effect(tmp_path: Path) -> None:
     interaction = result["effects"]["interaction"]
     assert interaction["mean_difference_in_differences"] == 48.0
     assert (out / "tables/condition_summary.csv").exists()
-    assert pd.read_csv(out / "tables/paired_effects.csv").shape[0] == 4
+    with (out / "tables/paired_effects.csv").open(newline="", encoding="utf-8") as handle:
+        assert len(list(csv.DictReader(handle))) == 4
